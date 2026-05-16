@@ -1,5 +1,5 @@
 {
-  "name": "easy-lay",
+  "name": "game-day-w",
   "version": "1.0.0",
   "description": "WNBA lookup app with current rosters, schedule, trades, and stats",
   "main": "api/index.js",

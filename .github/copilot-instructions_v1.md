@@ -1,4 +1,4 @@
-# Copilot Instructions for Easy Lay — Version 1
+# Copilot Instructions for Game Day W — Version 1
 
 Version: 1
 Date: 2026-05-13

@@ -1,4 +1,4 @@
-# Easy Lay 🏀
+# Game Day W 🏀
 
 A sleek, easy-to-use WNBA lookup app. Current rosters, schedules, stats, trades, injury reports, and more.
 
@@ -23,7 +23,7 @@ A sleek, easy-to-use WNBA lookup app. Current rosters, schedules, stats, trades,
 
 1. **Open the folder in VS Code:**
    ```bash
-   code ~/Projects/Easy\ Lay
+   code ~/Projects/GameDayW
    ```
 
 2. **Install dependencies:**
@@ -48,7 +48,7 @@ Vercel will automatically handle the Express backend and serve the static fronte
 ## Project Structure
 
 ```
-Easy Lay/
+Game Day W/
 ├── api/
 │   └── index.js              # Express server & SportRadar proxy
 ├── public/

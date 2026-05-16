@@ -30,7 +30,7 @@ function applyTheme(key) {
   root.setProperty('--secondary', t.secondary);
   root.setProperty('--accent', t.accent);
   root.setProperty('--on-primary', t.onPrimary);
-  localStorage.setItem('easyLayTheme', key);
+  localStorage.setItem('gameDayWTheme', key);
 }
 
 function initThemePicker() {
@@ -42,7 +42,7 @@ function initThemePicker() {
     opt.textContent = t.name;
     sel.appendChild(opt);
   }
-  const saved = localStorage.getItem('easyLayTheme') || 'wnba';
+  const saved = localStorage.getItem('gameDayWTheme') || 'wnba';
   sel.value = saved;
   applyTheme(saved);
   sel.addEventListener('change', (e) => applyTheme(e.target.value));

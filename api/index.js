@@ -294,7 +294,7 @@ app.get('/api/transactions', async (_req, res) => {
 const PORT = process.env.PORT || 3000;
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Easy Lay backend running on port ${PORT}`);
+    console.log(`Game Day W backend running on port ${PORT}`);
   });
 }
 

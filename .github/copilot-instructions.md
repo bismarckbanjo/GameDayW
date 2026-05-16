@@ -1,4 +1,4 @@
-# Copilot Instructions for Easy Lay
+# Copilot Instructions for Game Day W
 
 ## Build, Test, and Lint Commands
 - **Install dependencies:** `npm install`

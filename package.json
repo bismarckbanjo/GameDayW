@@ -1,0 +1,18 @@
+{
+  "name": "easy-lay",
+  "version": "1.0.0",
+  "description": "WNBA lookup app with current rosters, schedule, trades, and stats",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js",
+    "dev": "node api/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-fetch": "^2.6.11"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}

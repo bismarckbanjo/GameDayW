@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Easy Lay - WNBA Lookup</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="court-lines" aria-hidden="true"></div>
+
+      <div class="topbar">
+        <a class="brand-lockup" href="#" aria-label="Easy Lay home">
+          <span class="brand-mark">EL</span>
+          <span>
+            <strong>Easy Lay</strong>
+            <em>WNBA lookup hub</em>
+          </span>
+        </a>
+
+        <div class="theme-picker">
+          <label for="themeSelect">Team skin</label>
+          <select id="themeSelect"></select>
+        </div>
+      </div>
+
+      <section class="hero-card">
+        <div class="hero-copy">
+          <span class="eyebrow">Roster intelligence • schedule tracking • player lookup</span>
+          <h1>Nothin' but net</h1>
+        </div>
+
+        <div class="hero-visual" aria-hidden="true">
+          <div class="ball-orbit"></div>
+          <div class="stat-chip chip-one">
+            <span>PPG</span>
+            <strong>24.7</strong>
+          </div>
+          <div class="stat-chip chip-two">
+            <span>AST</span>
+            <strong>8.1</strong>
+          </div>
+          <div class="stat-chip chip-three">
+            <span>REB</span>
+            <strong>10.4</strong>
+          </div>
+        </div>
+      </section>
+    </header>
+
+    <div class="live-now-bar">
+      <button id="liveNowBtn" class="live-now-btn" data-live="false" aria-label="Show live games">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span class="live-label">Live Now</span>
+        <span class="live-count" id="liveCount">—</span>
+      </button>
+    </div>
+
+    <nav class="tabs" aria-label="Primary sections">
+      <button class="tab-btn active" data-tab="rosters">
+        <span class="tab-icon">🏀</span>
+        Rosters
+      </button>
+      <button class="tab-btn" data-tab="schedule">
+        <span class="tab-icon">📅</span>
+        Schedule
+      </button>
+      <button class="tab-btn" data-tab="trades">
+        <span class="tab-icon">↔</span>
+        Trades &amp; Waivers
+      </button>
+      <button class="tab-btn" data-tab="stats">
+        <span class="tab-icon">📊</span>
+        Player Stats
+      </button>
+      <button class="tab-btn" data-tab="coaches">
+        <span class="tab-icon">🎙</span>
+        Coaches
+      </button>
+      <button class="tab-btn" data-tab="injuries">
+        <span class="tab-icon">⛑</span>
+        Injuries
+      </button>
+    </nav>
+
+    <main>
+      <div id="banner" class="banner hidden">
+        <span id="bannerText"></span>
+        <button class="close-btn" onclick="closeBanner()" aria-label="Close banner">×</button>
+      </div>
+
+      <section id="rosters" class="tab-content active">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Team room</span>
+            <h2>Rosters</h2>
+          </div>
+          <div class="filters">
+            <select id="teamFilter">
+              <option value="">Select Team...</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="rostersGrid" class="grid">
+          <p>Loading rosters...</p>
+        </div>
+      </section>
+
+      <section id="schedule" class="tab-content">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Game slate</span>
+            <h2>Schedule</h2>
+          </div>
+        </div>
+
+        <div id="scheduleGrid" class="grid">
+          <p>Loading schedule...</p>
+        </div>
+      </section>
+
+      <section id="trades" class="tab-content">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Front office wire</span>
+            <h2>Trades &amp; Waivers</h2>
+          </div>
+        </div>
+
+        <div id="tradesGrid" class="grid">
+          <p>Loading recent trades and waivers...</p>
+        </div>
+      </section>
+
+      <section id="stats" class="tab-content">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Player lens</span>
+            <h2>Player Stats</h2>
+          </div>
+          <div class="filters">
+            <input type="text" id="playerSearch" placeholder="Search player..." />
+          </div>
+        </div>
+
+        <div id="statsGrid" class="grid">
+          <p>Search for a player to view stats...</p>
+        </div>
+      </section>
+
+      <section id="coaches" class="tab-content">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Sideline</span>
+            <h2>Coaches</h2>
+          </div>
+        </div>
+
+        <div id="coachesGrid" class="grid">
+          <p>Loading coaches...</p>
+        </div>
+      </section>
+
+      <section id="injuries" class="tab-content">
+        <div class="section-head">
+          <div>
+            <span class="section-kicker">Availability report</span>
+            <h2>Injuries</h2>
+          </div>
+        </div>
+
+        <div id="injuriesGrid" class="grid">
+          <p>Loading injury report...</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>&copy; 2026 Easy Lay | Data powered by ESPN</p>
+    </footer>
+  </div>
+
+  <div id="liveModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="liveModalTitle">
+    <div class="modal-content">
+      <div class="modal-head">
+        <h2 id="liveModalTitle">Live Now</h2>
+        <button class="modal-close" id="liveModalClose" aria-label="Close">×</button>
+      </div>
+      <div id="liveModalBody"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

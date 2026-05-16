@@ -23,6 +23,8 @@ const THEMES = {
   washington: { name: 'Washington Mystics',      primary: '#C8102E', secondary: '#0C2340', accent: '#8D9093', onPrimary: '#FFFFFF' },
 };
 
+const DARK_LOGO_THEMES = new Set(['dallas', 'goldenstate', 'indiana', 'lasvegas']);
+
 function applyTheme(key) {
   const t = THEMES[key] || THEMES.wnba;
   const root = document.documentElement.style;
@@ -30,6 +32,8 @@ function applyTheme(key) {
   root.setProperty('--secondary', t.secondary);
   root.setProperty('--accent', t.accent);
   root.setProperty('--on-primary', t.onPrimary);
+  const logo = document.querySelector('.brand-mark img');
+  if (logo) logo.src = DARK_LOGO_THEMES.has(key) ? '/dark.svg' : '/light.svg';
   localStorage.setItem('gameDayWTheme', key);
 }
 

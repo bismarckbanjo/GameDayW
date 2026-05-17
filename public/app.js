@@ -236,8 +236,22 @@ function displayRosters(teamId) {
 
 // Schedule
 let showPreviousGames = false;
-let scheduleTeamId = '';
+let scheduleTeamName = '';
 let scheduleSortOrder = 'soonest'; // 'soonest' | 'latest'
+
+// Real WNBA teams come from /api/teams. Anything else in the schedule (e.g., a national
+// team like NIGERIA in a preseason exhibition) gets a "Special" tag. TBD is its own case.
+function isWnbaTeam(team) {
+  if (!team?.id) return false;
+  return teamsData.some(t => String(t.id) === String(team.id));
+}
+function isTbdTeam(team) {
+  return (team?.name || '').toUpperCase() === 'TBD';
+}
+function specialTagHtml(team) {
+  if (!team || isTbdTeam(team) || isWnbaTeam(team)) return '';
+  return ` <span class="special-tag" title="Non-WNBA opponent (exhibition / international)">Special</span>`;
+}
 
 async function loadSchedule() {
   try {
@@ -257,24 +271,31 @@ async function loadSchedule() {
 function populateScheduleTeamFilter() {
   const sel = document.getElementById('scheduleTeamFilter');
   if (!sel || sel.dataset.populated === '1') return;
-  // Only teams that actually appear in the schedule — keeps the dropdown tidy.
-  const seen = new Map();
+  // Dedupe by name — ESPN ships TBD with multiple IDs (-1, -2), and the dropdown values
+  // become names so the filter naturally matches every variant.
+  const byName = new Map();
   for (const g of scheduleData) {
     for (const t of [g.home_team, g.away_team]) {
-      if (t?.id && !seen.has(t.id)) seen.set(t.id, t.name);
+      if (!t?.name || byName.has(t.name)) continue;
+      byName.set(t.name, {
+        isTbd: isTbdTeam(t),
+        isWnba: isWnbaTeam(t),
+      });
     }
   }
-  [...seen.entries()]
-    .sort((a, b) => a[1].localeCompare(b[1]))
-    .forEach(([id, name]) => {
+  // Rank: real WNBA teams, then specials, then TBD; alphabetical within each group.
+  const rank = (info) => info.isTbd ? 2 : (info.isWnba ? 0 : 1);
+  [...byName.entries()]
+    .sort((a, b) => (rank(a[1]) - rank(b[1])) || a[0].localeCompare(b[0]))
+    .forEach(([name, info]) => {
       const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = name;
+      opt.value = name;
+      opt.textContent = !info.isWnba && !info.isTbd ? `${name} — Special` : name;
       sel.appendChild(opt);
     });
-  sel.value = scheduleTeamId;
+  sel.value = scheduleTeamName;
   sel.addEventListener('change', (e) => {
-    scheduleTeamId = e.target.value;
+    scheduleTeamName = e.target.value;
     displaySchedule();
   });
   const sortSel = document.getElementById('scheduleSort');
@@ -340,9 +361,9 @@ function gameCardHtml(g) {
     <div class="card game">
       <h3>
         ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" class="team-logo-sm">` : ''}
-        ${esc(g.away_team?.name)} @
+        ${esc(g.away_team?.name)}${specialTagHtml(g.away_team)} @
         ${g.home_team?.logo ? `<img src="${esc(g.home_team.logo)}" class="team-logo-sm">` : ''}
-        ${esc(g.home_team?.name)}
+        ${esc(g.home_team?.name)}${specialTagHtml(g.home_team)}
       </h3>
       <p><strong>${date.toLocaleDateString()}</strong> ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
       <p>${esc(g.venue?.name || '')}</p>
@@ -357,8 +378,8 @@ function displaySchedule() {
   const grid = document.getElementById('scheduleGrid');
   grid.innerHTML = '';
 
-  const games = scheduleTeamId
-    ? scheduleData.filter(g => g.home_team?.id === scheduleTeamId || g.away_team?.id === scheduleTeamId)
+  const games = scheduleTeamName
+    ? scheduleData.filter(g => g.home_team?.name === scheduleTeamName || g.away_team?.name === scheduleTeamName)
     : scheduleData;
 
   if (!games.length) {
@@ -502,48 +523,84 @@ async function loadCoaches() {
 }
 
 // Injuries — grouped by team
+let injuriesData = [];
+let injuriesTeamName = '';
+
 async function loadInjuries() {
   const grid = document.getElementById('injuriesGrid');
   grid.innerHTML = '<p>Loading injury report…</p>';
   try {
-    const res = await fetch(`${API_BASE}/injuries`);
+    const [res] = await Promise.all([fetch(`${API_BASE}/injuries`), ensureTeams()]);
     const data = await res.json();
-    const items = data.injuries || [];
-    if (!items.length) {
-      grid.innerHTML = '<p>No injuries reported.</p>';
-      return;
-    }
-    const byTeam = new Map();
-    for (const i of items) {
-      const key = i.team?.name || 'Unknown';
-      if (!byTeam.has(key)) byTeam.set(key, []);
-      byTeam.get(key).push(i);
-    }
-    const teamNames = [...byTeam.keys()].sort();
-    let html = '';
-    for (const tn of teamNames) {
-      const list = byTeam.get(tn).sort((a, b) => new Date(b.date) - new Date(a.date));
-      html += `<h3 class="schedule-section">${esc(tn)} (${list.length})</h3>`;
-      for (const i of list) {
-        const detail = i.detail
-          ? ` · ${i.side ? esc(i.side) + ' ' : ''}${esc(i.detail)}`
-          : '';
-        html += `
-          <div class="card injury">
-            ${headshotEl({ headshot: i.player?.headshot, name: i.player?.name })}
-            <h3>${esc(i.player?.name || 'Unknown')} <small>(${esc(i.player?.position || '')})</small></h3>
-            <p><strong>${esc(i.status)}</strong>${detail}</p>
-            ${i.short_comment ? `<p>${esc(i.short_comment)}</p>` : ''}
-            <p class="meta"><small>${i.date ? new Date(i.date).toLocaleDateString() : ''}</small></p>
-          </div>
-        `;
-      }
-    }
-    grid.innerHTML = html;
+    injuriesData = data.injuries || [];
+    populateInjuriesTeamFilter();
+    displayInjuries();
   } catch (err) {
     grid.innerHTML = '<p>Error loading injuries.</p>';
     console.error('Injuries Error:', err);
   }
+}
+
+function populateInjuriesTeamFilter() {
+  const sel = document.getElementById('injuriesTeamFilter');
+  if (!sel || sel.dataset.populated === '1') return;
+  // Source from teamsData so the dropdown only lists real WNBA teams, even if a team
+  // currently has zero reported injuries.
+  [...teamsData]
+    .map(t => t.name)
+    .sort((a, b) => a.localeCompare(b))
+    .forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  sel.value = injuriesTeamName;
+  sel.addEventListener('change', (e) => {
+    injuriesTeamName = e.target.value;
+    displayInjuries();
+  });
+  sel.dataset.populated = '1';
+}
+
+function displayInjuries() {
+  const grid = document.getElementById('injuriesGrid');
+  const items = injuriesTeamName
+    ? injuriesData.filter(i => i.team?.name === injuriesTeamName)
+    : injuriesData;
+  if (!items.length) {
+    grid.innerHTML = injuriesTeamName
+      ? '<p>No injuries reported for this team.</p>'
+      : '<p>No injuries reported.</p>';
+    return;
+  }
+  const byTeam = new Map();
+  for (const i of items) {
+    const key = i.team?.name || 'Unknown';
+    if (!byTeam.has(key)) byTeam.set(key, []);
+    byTeam.get(key).push(i);
+  }
+  const teamNames = [...byTeam.keys()].sort();
+  let html = '';
+  for (const tn of teamNames) {
+    const list = byTeam.get(tn).sort((a, b) => new Date(b.date) - new Date(a.date));
+    html += `<h3 class="schedule-section">${esc(tn)} (${list.length})</h3>`;
+    for (const i of list) {
+      const detail = i.detail
+        ? ` · ${i.side ? esc(i.side) + ' ' : ''}${esc(i.detail)}`
+        : '';
+      html += `
+        <div class="card injury">
+          ${headshotEl({ headshot: i.player?.headshot, name: i.player?.name })}
+          <h3>${esc(i.player?.name || 'Unknown')} <small>(${esc(i.player?.position || '')})</small></h3>
+          <p><strong>${esc(i.status)}</strong>${detail}</p>
+          ${i.short_comment ? `<p>${esc(i.short_comment)}</p>` : ''}
+          <p class="meta"><small>${i.date ? new Date(i.date).toLocaleDateString() : ''}</small></p>
+        </div>
+      `;
+    }
+  }
+  grid.innerHTML = html;
 }
 
 // Player stats search

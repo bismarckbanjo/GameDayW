@@ -236,19 +236,57 @@ function displayRosters(teamId) {
 
 // Schedule
 let showPreviousGames = false;
+let scheduleTeamId = '';
+let scheduleSortOrder = 'soonest'; // 'soonest' | 'latest'
 
 async function loadSchedule() {
   try {
     // Always re-fetch — the API has a 60s server cache, so this is cheap and the user always
     // sees current state (scores, status changes, postponements) instead of a page-lifetime stale copy.
-    const res = await fetch(`${API_BASE}/schedule`);
+    const [res] = await Promise.all([fetch(`${API_BASE}/schedule`), ensureTeams()]);
     const data = await res.json();
     scheduleData = data.games || [];
-    displaySchedule(scheduleData);
+    populateScheduleTeamFilter();
+    displaySchedule();
   } catch (err) {
     document.getElementById('scheduleGrid').innerHTML = '<p>Error loading schedule.</p>';
     console.error('Schedule Error:', err);
   }
+}
+
+function populateScheduleTeamFilter() {
+  const sel = document.getElementById('scheduleTeamFilter');
+  if (!sel || sel.dataset.populated === '1') return;
+  // Only teams that actually appear in the schedule — keeps the dropdown tidy.
+  const seen = new Map();
+  for (const g of scheduleData) {
+    for (const t of [g.home_team, g.away_team]) {
+      if (t?.id && !seen.has(t.id)) seen.set(t.id, t.name);
+    }
+  }
+  [...seen.entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]))
+    .forEach(([id, name]) => {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  sel.value = scheduleTeamId;
+  sel.addEventListener('change', (e) => {
+    scheduleTeamId = e.target.value;
+    displaySchedule();
+  });
+  const sortSel = document.getElementById('scheduleSort');
+  if (sortSel && sortSel.dataset.wired !== '1') {
+    sortSel.value = scheduleSortOrder;
+    sortSel.addEventListener('change', (e) => {
+      scheduleSortOrder = e.target.value;
+      displaySchedule();
+    });
+    sortSel.dataset.wired = '1';
+  }
+  sel.dataset.populated = '1';
 }
 
 function dayKey(d) {
@@ -315,11 +353,18 @@ function gameCardHtml(g) {
   `;
 }
 
-function displaySchedule(games) {
+function displaySchedule() {
   const grid = document.getElementById('scheduleGrid');
   grid.innerHTML = '';
+
+  const games = scheduleTeamId
+    ? scheduleData.filter(g => g.home_team?.id === scheduleTeamId || g.away_team?.id === scheduleTeamId)
+    : scheduleData;
+
   if (!games.length) {
-    grid.innerHTML = '<p>No games found.</p>';
+    grid.innerHTML = scheduleTeamId
+      ? '<p>No games found for this team.</p>'
+      : '<p>No games found.</p>';
     return;
   }
 
@@ -327,41 +372,74 @@ function displaySchedule(games) {
   const today = dayKey(now);
   const tomorrow = dayKey(new Date(now.getTime() + 86400000));
   const nowMs = now.getTime();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth();
+  const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+  const monthLabel = (d) =>
+    d.getFullYear() === curYear
+      ? d.toLocaleString([], { month: 'long' })
+      : d.toLocaleString([], { month: 'long', year: 'numeric' });
 
-  const buckets = { previous: [], today: [], tomorrow: [], upcoming: [] };
+  const previous = [];
+  const todayGames = [];
+  const tomorrowGames = [];
+  // Order-preserving map so months render in calendar order (games arrive sorted by date).
+  const futureByMonth = new Map();
+
   for (const g of games) {
     const d = new Date(g.scheduled);
     const k = dayKey(d);
-    if (k === today) buckets.today.push(g);
-    else if (k === tomorrow) buckets.tomorrow.push(g);
-    else if (d.getTime() > nowMs) buckets.upcoming.push(g);
-    else buckets.previous.push(g);
+    if (d.getTime() < nowMs && k !== today) {
+      previous.push(g);
+      continue;
+    }
+    if (k === today) { todayGames.push(g); continue; }
+    if (k === tomorrow) { tomorrowGames.push(g); continue; }
+    const mk = monthKey(d);
+    if (!futureByMonth.has(mk)) futureByMonth.set(mk, { label: '', games: [] });
+    const bucket = futureByMonth.get(mk);
+    bucket.label = d.getFullYear() === curYear && d.getMonth() === curMonth
+      ? `Rest of ${monthLabel(d)}`
+      : monthLabel(d);
+    bucket.games.push(g);
   }
-  buckets.previous.sort((a, b) => new Date(b.scheduled) - new Date(a.scheduled));
+
+  const asc = (a, b) => new Date(a.scheduled) - new Date(b.scheduled);
+  const desc = (a, b) => new Date(b.scheduled) - new Date(a.scheduled);
+  const futureSort = scheduleSortOrder === 'latest' ? desc : asc;
+
+  previous.sort(desc);
+  todayGames.sort(asc);
+  tomorrowGames.sort(asc);
+  for (const b of futureByMonth.values()) b.games.sort(futureSort);
+
+  const futureEntries = [...futureByMonth.entries()];
+  if (scheduleSortOrder === 'latest') futureEntries.reverse();
 
   let html = '';
 
-  if (showPreviousGames && buckets.previous.length) {
-    html += `<button class="schedule-toggle" data-action="hide-previous">Hide Previous Games</button>`;
+  if (showPreviousGames && previous.length) {
+    html += `<button class="schedule-toggle" data-action="toggle-previous">Hide Previous Games</button>`;
     html += `<h3 class="schedule-section">Previous Games</h3>`;
-    for (const g of buckets.previous) html += gameCardHtml(g);
-  } else if (buckets.previous.length) {
-    html += `<button class="schedule-toggle" data-action="show-previous">Show Previous Games (${buckets.previous.length})</button>`;
+    for (const g of previous) html += gameCardHtml(g);
+  } else if (previous.length) {
+    html += `<button class="schedule-toggle" data-action="toggle-previous">Show Previous Games (${previous.length})</button>`;
   }
 
-  if (buckets.today.length) {
+  if (todayGames.length) {
     html += `<h3 class="schedule-section">Today</h3>`;
-    for (const g of buckets.today) html += gameCardHtml(g);
+    for (const g of todayGames) html += gameCardHtml(g);
   }
-  if (buckets.tomorrow.length) {
+  if (tomorrowGames.length) {
     html += `<h3 class="schedule-section">Tomorrow</h3>`;
-    for (const g of buckets.tomorrow) html += gameCardHtml(g);
+    for (const g of tomorrowGames) html += gameCardHtml(g);
   }
-  if (buckets.upcoming.length) {
-    html += `<h3 class="schedule-section">Upcoming</h3>`;
-    for (const g of buckets.upcoming) html += gameCardHtml(g);
+  for (const [, bucket] of futureEntries) {
+    html += `<h3 class="schedule-section">${esc(bucket.label)}</h3>`;
+    for (const g of bucket.games) html += gameCardHtml(g);
   }
-  if (!buckets.today.length && !buckets.tomorrow.length && !buckets.upcoming.length && !showPreviousGames) {
+
+  if (!todayGames.length && !tomorrowGames.length && !futureEntries.length && !showPreviousGames) {
     html += `<p>No upcoming games scheduled.</p>`;
   }
 
@@ -369,7 +447,7 @@ function displaySchedule(games) {
   grid.querySelectorAll('.schedule-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
       showPreviousGames = !showPreviousGames;
-      displaySchedule(scheduleData);
+      displaySchedule();
     });
   });
 }

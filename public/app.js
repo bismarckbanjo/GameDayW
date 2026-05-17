@@ -114,7 +114,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 // --- URL routing -------------------------------------------------------------
 // State is mirrored into the query string so deep links (?tab=schedule&team=Indiana%20Fever,
 // ?tab=stats&player=4433403) are shareable and the browser back button works the way fans expect.
-const KNOWN_TABS = new Set(['rosters', 'schedule', 'stats', 'coaches', 'injuries', 'trades']);
+const KNOWN_TABS = new Set(['rosters', 'schedule', 'stats', 'injuries', 'trades']);
 let suppressHistory = false; // true while restoring from popstate to avoid feedback loops
 
 function buildSearch(state) {
@@ -154,7 +154,6 @@ async function loadTabData(tabName) {
       case 'rosters': await loadRosters(); break;
       case 'schedule': await loadSchedule(); break;
       case 'stats': await loadStatsLanding(); break;
-      case 'coaches': await loadCoaches(); break;
       case 'injuries': await loadInjuries(); break;
       case 'trades': await loadTrades(); break;
     }
@@ -294,7 +293,6 @@ function displayRosters(teamId) {
 // Schedule
 let showPreviousGames = false;
 let scheduleTeamName = '';
-let scheduleSortOrder = 'soonest'; // 'soonest' | 'latest'
 let scheduleFavApplied = false;
 let injuriesFavApplied = false;
 
@@ -364,15 +362,6 @@ function populateScheduleTeamFilter() {
     displaySchedule();
     pushUrlState(scheduleTeamName ? { tab: 'schedule', team: scheduleTeamName } : { tab: 'schedule' });
   });
-  const sortSel = document.getElementById('scheduleSort');
-  if (sortSel && sortSel.dataset.wired !== '1') {
-    sortSel.value = scheduleSortOrder;
-    sortSel.addEventListener('change', (e) => {
-      scheduleSortOrder = e.target.value;
-      displaySchedule();
-    });
-    sortSel.dataset.wired = '1';
-  }
   sel.dataset.populated = '1';
 }
 
@@ -423,21 +412,27 @@ function gameCardHtml(g) {
   const liveDetail = g.state === 'in' && g.display_clock
     ? ` · Q${esc(g.period || '')} ${esc(g.display_clock)}`
     : '';
-  const rec = (t) => t?.record ? ` <span class="team-record-inline">(${esc(t.record)})</span>` : '';
   // Only WNBA-vs-WNBA matchups get the head-to-head deep link — for TBD or
   // non-WNBA opponents the matchup page would be mostly empty.
   const tappable = !!g.id && isWnbaTeam(g.away_team) && isWnbaTeam(g.home_team);
   const linkAttrs = tappable
     ? ` data-game-id="${esc(g.id)}" role="button" tabindex="0" aria-label="Open head-to-head for ${esc(g.away_team?.name || '')} at ${esc(g.home_team?.name || '')}"`
     : '';
+  const recordLine = (g.away_team?.record || g.home_team?.record)
+    ? `<p class="game-records">
+         ${g.away_team?.abbreviation ? `<span>${esc(g.away_team.abbreviation)} <strong>${esc(g.away_team.record || '—')}</strong></span>` : ''}
+         ${g.home_team?.abbreviation ? `<span>${esc(g.home_team.abbreviation)} <strong>${esc(g.home_team.record || '—')}</strong></span>` : ''}
+       </p>`
+    : '';
   return `
     <div class="card game${tappable ? ' is-link' : ''}"${linkAttrs}>
       <h3>
         ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" class="team-logo-sm">` : ''}
-        ${esc(g.away_team?.name)}${rec(g.away_team)}${specialTagHtml(g.away_team)} @
+        ${esc(g.away_team?.name)}${specialTagHtml(g.away_team)} @
         ${g.home_team?.logo ? `<img src="${esc(g.home_team.logo)}" class="team-logo-sm">` : ''}
-        ${esc(g.home_team?.name)}${rec(g.home_team)}${specialTagHtml(g.home_team)}
+        ${esc(g.home_team?.name)}${specialTagHtml(g.home_team)}
       </h3>
+      ${recordLine}
       <p><strong>${date.toLocaleDateString()}</strong> ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
       <p>${esc(g.venue?.name || '')}</p>
       ${score}
@@ -500,15 +495,13 @@ function displaySchedule() {
 
   const asc = (a, b) => new Date(a.scheduled) - new Date(b.scheduled);
   const desc = (a, b) => new Date(b.scheduled) - new Date(a.scheduled);
-  const futureSort = scheduleSortOrder === 'latest' ? desc : asc;
 
   previous.sort(desc);
   todayGames.sort(asc);
   tomorrowGames.sort(asc);
-  for (const b of futureByMonth.values()) b.games.sort(futureSort);
+  for (const b of futureByMonth.values()) b.games.sort(asc);
 
   const futureEntries = [...futureByMonth.entries()];
-  if (scheduleSortOrder === 'latest') futureEntries.reverse();
 
   let html = '';
 
@@ -683,29 +676,6 @@ async function openMatchup(gameId) {
     matchupTeamColHtml('home', homeRes?.team, homeStatsRes?.stats, homeInj, g.home_team);
 }
 
-// Coaches
-async function loadCoaches() {
-  const grid = document.getElementById('coachesGrid');
-  grid.innerHTML = '<p>Loading coaches…</p>';
-  try {
-    await ensureTeams();
-    grid.innerHTML = '';
-    teamsData.forEach(team => {
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.innerHTML = `
-        ${team.logo ? `<img src="${esc(team.logo)}" alt="${esc(team.name)}" class="team-logo">` : ''}
-        <h3>${esc(team.head_coach || 'Coach TBA')}</h3>
-        <p><strong>Team:</strong> ${esc(team.name)}</p>
-      `;
-      grid.appendChild(card);
-    });
-  } catch (err) {
-    grid.innerHTML = '<p>Error loading coaches.</p>';
-    console.error('Coaches Error:', err);
-  }
-}
-
 // Injuries — grouped by team
 let injuriesData = [];
 let injuriesTeamName = '';
@@ -856,25 +826,10 @@ function displayTrades(trades) {
   }).join('');
 }
 
-// Player stats search
-let searchTimer;
-document.getElementById('playerSearch')?.addEventListener('input', (e) => {
-  clearTimeout(searchTimer);
-  const q = e.target.value.trim();
-  if (q.length < 2) {
-    // Empty search returns the fan to the league-leaders board rather than a blank prompt.
-    loadStatsLanding();
-    return;
-  }
-  searchTimer = setTimeout(() => searchPlayers(q), 250);
-});
-
-// League leaders board — what the Player Stats tab opens to before any search.
+// League leaders board — what the Stats tab opens to before any search.
 let leadersData = null;
 async function loadStatsLanding() {
   const grid = document.getElementById('statsGrid');
-  const search = document.getElementById('playerSearch');
-  if (search && search.value.trim().length >= 2) return; // user is mid-search; don't clobber
   grid.innerHTML = '<p>Loading league leaders…</p>';
   try {
     if (!leadersData) {
@@ -934,50 +889,6 @@ function renderStatsLanding(categories) {
       { id: row.dataset.teamId, name: row.dataset.teamName },
       { name: row.dataset.playerName }));
   });
-}
-
-async function searchPlayers(q) {
-  const grid = document.getElementById('statsGrid');
-  grid.innerHTML = '<p>Searching…</p>';
-  try {
-    const res = await fetch(`${API_BASE}/players/search?q=${encodeURIComponent(q)}`);
-    const data = await res.json();
-    const players = data.players || [];
-    if (!players.length) {
-      grid.innerHTML = '<p>No players matched.</p>';
-      return;
-    }
-    grid.innerHTML = players.map(p => `
-      <div class="card player" data-player-id="${esc(p.id)}">
-        ${headshotEl(p)}
-        <h3>${esc(p.name)}</h3>
-        <p>${esc(p.team_name)} · ${esc(p.position || '')} · #${esc(p.jersey || '-')}</p>
-        <button
-          data-player-id="${esc(p.id)}"
-          data-team-id="${esc(p.team_id)}"
-          data-team-name="${esc(p.team_name || '')}"
-          data-player-name="${esc(p.name || '')}"
-          data-jersey="${esc(p.jersey || '')}"
-          data-position="${esc(p.position || '')}"
-          data-height="${esc(p.height || '')}"
-          data-college="${esc(p.college || '')}">View Stats</button>
-      </div>
-    `).join('');
-    grid.querySelectorAll('button[data-player-id]').forEach(b =>
-      b.addEventListener('click', () => openPlayer(b.dataset.playerId,
-        { id: b.dataset.teamId, name: b.dataset.teamName },
-        {
-          name: b.dataset.playerName,
-          jersey: b.dataset.jersey,
-          position: b.dataset.position,
-          height: b.dataset.height,
-          college: b.dataset.college,
-        }))
-    );
-  } catch (err) {
-    grid.innerHTML = '<p>Search error.</p>';
-    console.error(err);
-  }
 }
 
 const STAT_LABELS = {
@@ -1091,9 +1002,7 @@ async function openPlayer(playerId, team, hints) {
       displayRosters(team.id);
     });
     document.getElementById('backToSearch')?.addEventListener('click', () => {
-      const input = document.getElementById('playerSearch');
-      if (input && input.value.length >= 2) searchPlayers(input.value);
-      else loadStatsLanding();
+      loadStatsLanding();
     });
   };
 
@@ -1293,16 +1202,6 @@ async function pollLive() {
     const games = data.games || [];
     liveGamesCache = games;
     renderTodayStrip(games);
-    const live = games.filter(g => g.state === 'in');
-    const btn = document.getElementById('liveNowBtn');
-    const count = document.getElementById('liveCount');
-    if (live.length) {
-      btn.dataset.live = 'true';
-      count.textContent = live.length;
-    } else {
-      btn.dataset.live = 'false';
-      count.textContent = '0';
-    }
   } catch (err) {
     console.error('Live poll error:', err);
   }
@@ -1611,7 +1510,6 @@ document.addEventListener('DOMContentLoaded', () => {
     hideLiveModal();
   });
 
-  document.getElementById('liveNowBtn')?.addEventListener('click', showLiveModal);
   document.getElementById('todayStrip')?.addEventListener('click', showLiveModal);
   document.getElementById('liveModalClose')?.addEventListener('click', hideLiveModal);
   document.getElementById('liveModal')?.addEventListener('click', (e) => {

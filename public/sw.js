@@ -7,7 +7,7 @@
 //    if the network actually fails.
 // Bump VERSION when shipping breaking changes to invalidate old caches.
 
-const VERSION = 'v2';
+const VERSION = 'v4';
 const SHELL_CACHE = `shell-${VERSION}`;
 const API_CACHE = `api-${VERSION}`;
 

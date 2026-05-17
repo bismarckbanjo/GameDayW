@@ -51,11 +51,6 @@
     </header>
 
     <div class="live-now-bar">
-      <button id="liveNowBtn" class="live-now-btn" data-live="false" aria-label="Show live games">
-        <span class="live-dot" aria-hidden="true"></span>
-        <span class="live-label">Live Now</span>
-        <span class="live-count" id="liveCount">—</span>
-      </button>
       <button id="todayStrip" class="today-strip" aria-label="See today's games">
         <span class="today-strip-loading">Checking tonight's slate…</span>
       </button>
@@ -64,7 +59,7 @@
     <nav class="tabs" aria-label="Primary sections">
       <button class="tab-btn active" data-tab="rosters">
         <span class="tab-icon">🏀</span>
-        Rosters
+        Teams
       </button>
       <button class="tab-btn" data-tab="schedule">
         <span class="tab-icon">📅</span>
@@ -72,11 +67,7 @@
       </button>
       <button class="tab-btn" data-tab="stats">
         <span class="tab-icon">📊</span>
-        Player Stats
-      </button>
-      <button class="tab-btn" data-tab="coaches">
-        <span class="tab-icon">🎙</span>
-        Coaches
+        Stats
       </button>
       <button class="tab-btn" data-tab="injuries">
         <span class="tab-icon">⛑</span>
@@ -96,10 +87,7 @@
 
       <section id="rosters" class="tab-content active">
         <div class="section-head">
-          <div>
-            <span class="section-kicker">Team room</span>
-            <h2>Rosters</h2>
-          </div>
+          <h2>Teams</h2>
           <div class="filters">
             <select id="teamFilter">
               <option value="">Select Team...</option>
@@ -114,17 +102,10 @@
 
       <section id="schedule" class="tab-content">
         <div class="section-head">
-          <div>
-            <span class="section-kicker">Game slate</span>
-            <h2>Schedule</h2>
-          </div>
+          <h2>Schedule</h2>
           <div class="filters">
             <select id="scheduleTeamFilter" aria-label="Filter schedule by team">
               <option value="">All Teams</option>
-            </select>
-            <select id="scheduleSort" aria-label="Sort schedule">
-              <option value="soonest">Soonest first</option>
-              <option value="latest">Latest first</option>
             </select>
           </div>
         </div>
@@ -136,13 +117,7 @@
 
       <section id="stats" class="tab-content">
         <div class="section-head">
-          <div>
-            <span class="section-kicker">Player lens</span>
-            <h2>Player Stats</h2>
-          </div>
-          <div class="filters">
-            <input type="text" id="playerSearch" placeholder="Search player..." />
-          </div>
+          <h2>Stats</h2>
         </div>
 
         <div id="statsGrid" class="grid">
@@ -150,25 +125,9 @@
         </div>
       </section>
 
-      <section id="coaches" class="tab-content">
-        <div class="section-head">
-          <div>
-            <span class="section-kicker">Sideline</span>
-            <h2>Coaches</h2>
-          </div>
-        </div>
-
-        <div id="coachesGrid" class="grid">
-          <p>Loading coaches...</p>
-        </div>
-      </section>
-
       <section id="injuries" class="tab-content">
         <div class="section-head">
-          <div>
-            <span class="section-kicker">Availability report</span>
-            <h2>Injuries</h2>
-          </div>
+          <h2>Injuries</h2>
           <div class="filters">
             <select id="injuriesTeamFilter" aria-label="Filter injuries by team">
               <option value="">All Teams</option>
@@ -183,10 +142,7 @@
 
       <section id="trades" class="tab-content">
         <div class="section-head">
-          <div>
-            <span class="section-kicker">Roster moves</span>
-            <h2>Trades</h2>
-          </div>
+          <h2>Trades</h2>
         </div>
 
         <div id="tradesGrid" class="grid">

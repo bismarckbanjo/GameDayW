@@ -662,15 +662,25 @@ let livePollTimer = null;
 function renderTodayStrip(games) {
   const strip = document.getElementById('todayStrip');
   if (!strip) return;
-  const live = games.filter(g => g.state === 'in');
-  const upcoming = games.filter(g => g.state === 'pre').sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
-  const finished = games.filter(g => g.state === 'post').sort((a, b) => new Date(b.scheduled) - new Date(a.scheduled));
+
+  // ESPN's scoreboard returns the next set of games — which on a day with no games means
+  // tomorrow's slate. Filter by actual local date before claiming anything is "today".
+  const now = new Date();
+  const todayK = dayKey(now);
+  const tomorrowK = dayKey(new Date(now.getTime() + 86400000));
+  const isToday = (g) => dayKey(new Date(g.scheduled)) === todayK;
+
+  const liveToday = games.filter(g => g.state === 'in' && isToday(g));
+  const upcomingToday = games.filter(g => g.state === 'pre' && isToday(g))
+    .sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
+  const finishedToday = games.filter(g => g.state === 'post' && isToday(g))
+    .sort((a, b) => new Date(b.scheduled) - new Date(a.scheduled));
 
   const teamLabel = (t) => esc(t?.abbreviation || t?.name || '');
 
-  if (live.length) {
+  if (liveToday.length) {
     strip.dataset.state = 'live';
-    strip.innerHTML = live.slice(0, 3).map(g => `
+    strip.innerHTML = liveToday.slice(0, 3).map(g => `
       <span class="today-chip is-live">
         <span class="td-live-dot" aria-hidden="true"></span>
         ${teamLabel(g.away_team)} <strong>${esc(g.away_team?.score)}</strong>
@@ -679,8 +689,11 @@ function renderTodayStrip(games) {
         <em>Q${esc(g.period || '')} ${esc(g.display_clock || '')}</em>
       </span>
     `).join('');
-  } else if (upcoming.length) {
-    const next = upcoming[0];
+    return;
+  }
+
+  if (upcomingToday.length) {
+    const next = upcomingToday[0];
     const t = new Date(next.scheduled).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     strip.dataset.state = 'next';
     strip.innerHTML = `
@@ -688,8 +701,11 @@ function renderTodayStrip(games) {
         Next today · <strong>${esc(t)}</strong> · ${teamLabel(next.away_team)} @ ${teamLabel(next.home_team)}
       </span>
     `;
-  } else if (finished.length) {
-    const last = finished[0];
+    return;
+  }
+
+  if (finishedToday.length) {
+    const last = finishedToday[0];
     strip.dataset.state = 'final';
     strip.innerHTML = `
       <span class="today-chip is-final">
@@ -698,10 +714,30 @@ function renderTodayStrip(games) {
         <strong>${esc(last.home_team?.score)}</strong> ${teamLabel(last.home_team)}
       </span>
     `;
-  } else {
-    strip.dataset.state = 'empty';
-    strip.innerHTML = `<span class="today-empty">No WNBA games today</span>`;
+    return;
   }
+
+  // No games today. Fall back to the next scheduled game, with an honest day label.
+  const future = games.filter(g => g.state === 'pre' && new Date(g.scheduled).getTime() > now.getTime())
+    .sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
+  if (future.length) {
+    const next = future[0];
+    const d = new Date(next.scheduled);
+    const dayLabel = dayKey(d) === tomorrowK
+      ? 'Tomorrow'
+      : d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    strip.dataset.state = 'next';
+    strip.innerHTML = `
+      <span class="today-chip is-next">
+        Next up · <strong>${esc(dayLabel)} ${esc(t)}</strong> · ${teamLabel(next.away_team)} @ ${teamLabel(next.home_team)}
+      </span>
+    `;
+    return;
+  }
+
+  strip.dataset.state = 'empty';
+  strip.innerHTML = `<span class="today-empty">No WNBA games today</span>`;
 }
 
 async function pollLive() {
@@ -735,9 +771,19 @@ function startLivePolling() {
 function showLiveModal() {
   const modal = document.getElementById('liveModal');
   const body = document.getElementById('liveModalBody');
-  const live = liveGamesCache.filter(g => g.state === 'in');
-  const upcoming = liveGamesCache.filter(g => g.state === 'pre').sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
-  const finished = liveGamesCache.filter(g => g.state === 'post').sort((a, b) => new Date(b.scheduled) - new Date(a.scheduled));
+
+  // ESPN's scoreboard returns the next slate when today is empty — filter by actual local date
+  // before labelling anything as "Today".
+  const now = new Date();
+  const todayK = dayKey(now);
+  const tomorrowK = dayKey(new Date(now.getTime() + 86400000));
+  const isToday = (g) => dayKey(new Date(g.scheduled)) === todayK;
+
+  const live = liveGamesCache.filter(g => g.state === 'in' && isToday(g));
+  const upcomingToday = liveGamesCache.filter(g => g.state === 'pre' && isToday(g))
+    .sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
+  const finishedToday = liveGamesCache.filter(g => g.state === 'post' && isToday(g))
+    .sort((a, b) => new Date(b.scheduled) - new Date(a.scheduled));
 
   let html = '';
   if (live.length) {
@@ -746,16 +792,32 @@ function showLiveModal() {
   } else {
     html += `<p style="padding:1rem 0;color:var(--muted);font-weight:800;">No games are live right now.</p>`;
   }
-  if (upcoming.length) {
+  if (upcomingToday.length) {
     html += `<h3 class="schedule-section">Starting Today</h3>`;
-    html += `<div class="grid">${upcoming.map(gameCardHtml).join('')}</div>`;
+    html += `<div class="grid">${upcomingToday.map(gameCardHtml).join('')}</div>`;
   }
-  if (finished.length) {
+  if (finishedToday.length) {
     html += `<h3 class="schedule-section">Finished Today</h3>`;
-    html += `<div class="grid">${finished.map(gameCardHtml).join('')}</div>`;
+    html += `<div class="grid">${finishedToday.map(gameCardHtml).join('')}</div>`;
   }
-  if (!live.length && !upcoming.length && !finished.length) {
-    html += `<p style="padding:1rem 0;color:var(--muted);font-weight:800;">No WNBA games on the schedule today.</p>`;
+
+  // If today has nothing, surface the next scheduled day (often tomorrow) under its own header.
+  if (!live.length && !upcomingToday.length && !finishedToday.length) {
+    const future = liveGamesCache
+      .filter(g => g.state === 'pre' && new Date(g.scheduled).getTime() > now.getTime())
+      .sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
+    if (future.length) {
+      const firstK = dayKey(new Date(future[0].scheduled));
+      const nextDay = future.filter(g => dayKey(new Date(g.scheduled)) === firstK);
+      const d = new Date(future[0].scheduled);
+      const label = firstK === tomorrowK
+        ? 'Tomorrow'
+        : d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+      html += `<h3 class="schedule-section">Next Up · ${esc(label)}</h3>`;
+      html += `<div class="grid">${nextDay.map(gameCardHtml).join('')}</div>`;
+    } else {
+      html += `<p style="padding:1rem 0;color:var(--muted);font-weight:800;">No WNBA games on the schedule today.</p>`;
+    }
   }
 
   body.innerHTML = html;

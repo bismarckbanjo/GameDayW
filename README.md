@@ -1,91 +1,78 @@
 # Game Day W 🏀
 
-A sleek, easy-to-use WNBA lookup app. Current rosters, schedules, stats, trades, injury reports, and more.
+A sleek, easy-to-use WNBA lookup app. Built for fans who are tired of sifting through ESPN and the WNBA app just to find out who's playing tonight.
 
 ## Features
 
-- **Current Rosters** - Browse WNBA team rosters and player info
-- **2026 Schedule** - Full season schedule with venues
-- **Trades & Waivers** - Latest player transactions (announcements)
-- **Player Stats** - Quick lookup for player statistics
-- **Coach Directory** - Find coaches by team
-- **Injury Report** - Stay updated on player injuries
-- **Dashboard Design** - Clean, minimal card-based interface
+- **Tonight's Games** — sticky strip with live scores and what's on tonight
+- **Live Now** — modal with everything happening today (in progress, upcoming, finished)
+- **Favorites** — star your teams; they surface first on the Rosters tab
+- **Rosters** — browse every WNBA team and player
+- **Schedule** — full season, bucketed by Today / Tomorrow / Upcoming
+- **Player Stats** — search any player, see season averages and totals
+- **Coaches** — head coach by team
+- **Injuries** — grouped by team, sorted by date
+- **Trades & Waivers** — recent transaction headlines
+- **Team Skins** — recolor the UI in your favorite team's palette
 
 ## Tech Stack
 
-- **Frontend:** Vanilla JS, HTML5, CSS3 (no build step)
-- **Backend:** Express.js (Node.js)
-- **API:** SportRadar WNBA API
-- **Deployment:** Vercel
+- **Frontend:** Vanilla JS, HTML5, CSS3 (no build step, no framework)
+- **Backend:** Express.js (Node.js 22.x)
+- **Data:** ESPN public APIs (no API key required)
+- **Deployment:** Vercel (serverless function for the API, static for the frontend)
 
 ## Setup
 
-1. **Open the folder in VS Code:**
-   ```bash
-   code ~/Projects/GameDayW
-   ```
+```bash
+npm install
+npm run dev
+```
 
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
+Visit `http://localhost:3000`.
 
-3. **Run locally:**
-   ```bash
-   npm run dev
-   ```
-   Visit `http://localhost:3000`
+## Deployment
 
-## Deployment to Vercel
-
-1. Push to GitHub
-2. Connect repo to Vercel
-3. Deploy (automatic)
-
-Vercel will automatically handle the Express backend and serve the static frontend.
+Pushed to `main` deploys automatically via Vercel. Backend runs as a serverless function; `public/` is served statically.
 
 ## Project Structure
 
 ```
-Game Day W/
+GameDayW/
 ├── api/
-│   └── index.js              # Express server & SportRadar proxy
+│   └── index.js              # Express server + ESPN proxy with in-memory cache
 ├── public/
-│   ├── index.html            # Main page
-│   ├── styles.css            # Dashboard styling
-│   └── app.js                # Frontend logic
-├── package.json              # Dependencies
-├── vercel.json              # Vercel deployment config
-└── .gitignore
+│   ├── index.html            # SPA shell with tabbed sections
+│   ├── app.js                # Frontend logic (tabs, fetch, render, favorites)
+│   ├── styles.css            # Design system, layout, theming
+│   ├── light.svg / dark.svg  # Brand marks (swap by team skin)
+│   ├── icon.png              # Apple touch icon
+│   └── manifest.webmanifest  # PWA manifest
+├── package.json
+├── vercel.json               # Build + routing config
+└── FUTURE.md                 # Deferred improvements
 ```
 
 ## API Endpoints
 
-Your Express backend provides:
+All endpoints proxy ESPN with server-side caching (TTL in parentheses):
 
-- `GET /api/schedule` - Full 2026 season schedule
-- `GET /api/teams` - All WNBA teams with rosters
-- `GET /api/team/:teamId` - Specific team profile
-- `GET /api/player/:playerId` - Player profile & stats
-- `GET /api/standings` - League standings
+- `GET /api/teams` — every team with roster + head coach (6h)
+- `GET /api/team/:teamId` — single team detail (6h, shared cache)
+- `GET /api/schedule` — full season schedule, May–Oct (60s)
+- `GET /api/live` — today's scoreboard, polled by the client every 30s (30s)
+- `GET /api/player/:playerId` — profile + season stats (no cache)
+- `GET /api/players/search?q=` — name search across every roster (no cache)
+- `GET /api/injuries` — grouped injury report (10m)
+- `GET /api/transactions` — headline filter of league news (15m)
+- `GET /api/standings` — raw ESPN standings (5m) — not yet wired into the UI
 
 ## Notes
 
-- API key is embedded in `api/index.js` (fine for trial/development)
-- For production, move to environment variables
-- Some features (trades, injuries) may need additional SportRadar endpoints
-- Placeholder sections ready for expanded features
-
-## TODO
-
-- [ ] Real-time trades/waivers banner
-- [ ] Player stats search integration
-- [ ] Injury report data fetching
-- [ ] Team detail views
-- [ ] Schedule filtering by date/team
-- [ ] Mobile optimization
+- ESPN APIs are public and unkeyed. There are no secrets to manage.
+- The "current season" auto-rolls based on the calendar: May–Oct uses the current year, Nov–Apr uses the prior year (so the offseason still shows the most recent season).
+- See `FUTURE.md` for known limitations and planned improvements.
 
 ---
 
-**Made with ❤️ for WNBA fans**
+**Made for WNBA fans.**

@@ -3,6 +3,53 @@ const API_BASE = '/api';
 let teamsData = [];
 let scheduleData = [];
 
+// Escape any string before interpolating into innerHTML. ESPN data is generally clean,
+// but a stray `<` would otherwise break the layout and a malicious field could inject script.
+function esc(v) {
+  if (v == null) return '';
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Favorites — team IDs the user has starred. Stored in localStorage so they persist across visits.
+const FAVORITES_KEY = 'gameDayWFavorites';
+function getFavorites() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+function isFavorite(teamId) {
+  return getFavorites().has(String(teamId));
+}
+function toggleFavorite(teamId) {
+  const favs = getFavorites();
+  const id = String(teamId);
+  if (favs.has(id)) favs.delete(id); else favs.add(id);
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favs]));
+}
+function favStarHtml(teamId) {
+  const fav = isFavorite(teamId);
+  const label = fav ? 'Remove from favorites' : 'Add to favorites';
+  return `<button class="fav-star ${fav ? 'is-fav' : ''}" data-fav-team="${esc(teamId)}" aria-label="${label}" title="${label}" type="button">${fav ? '★' : '☆'}</button>`;
+}
+function wireFavStars(root) {
+  root.querySelectorAll('.fav-star').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFavorite(btn.dataset.favTeam);
+      // Re-render so the favorited team moves to the top and the star fills in.
+      const filter = document.getElementById('teamFilter');
+      displayRosters(filter?.value || '');
+    });
+  });
+}
+
 // Theme palettes — { primary, secondary, accent, onPrimary }
 const THEMES = {
   wnba: { name: 'WNBA (default)', primary: '#F26B30', secondary: '#002B5C', accent: '#FFFFFF', onPrimary: '#FFFFFF' },
@@ -92,10 +139,11 @@ function initials(name) {
 }
 
 function headshotEl(player) {
+  const init = esc(initials(player.name));
   if (player.headshot) {
-    return `<img src="${player.headshot}" alt="" class="headshot" onerror="this.outerHTML='<span class=&quot;headshot&quot;>${initials(player.name)}</span>'">`;
+    return `<img src="${esc(player.headshot)}" alt="" class="headshot" onerror="this.outerHTML='<span class=&quot;headshot&quot;>${init}</span>'">`;
   }
-  return `<span class="headshot">${initials(player.name)}</span>`;
+  return `<span class="headshot">${init}</span>`;
 }
 
 // Rosters
@@ -127,22 +175,22 @@ function displayRosters(teamId) {
   if (teamId) {
     const t = teams[0];
     const playerRows = (t.players || []).map(p => `
-      <div class="player-row" data-player-id="${p.id}" data-team-id="${t.id}" data-team-name="${t.name.replace(/"/g, '&quot;')}">
+      <div class="player-row" data-player-id="${esc(p.id)}" data-team-id="${esc(t.id)}" data-team-name="${esc(t.name)}">
         ${headshotEl(p)}
-        <span class="jersey">${p.jersey || '-'}</span>
-        <span class="name">${p.name}</span>
-        <span class="pos">${p.position || ''}</span>
-        <span class="ht">${p.height || ''}</span>
+        <span class="jersey">${esc(p.jersey || '-')}</span>
+        <span class="name">${esc(p.name)}</span>
+        <span class="pos">${esc(p.position || '')}</span>
+        <span class="ht">${esc(p.height || '')}</span>
       </div>
     `).join('');
     grid.innerHTML = `
       <button class="back-btn" id="backToTeams">← All Teams</button>
       <div class="card team-detail">
         <div class="team-header">
-          ${t.logo ? `<img src="${t.logo}" alt="${t.name}" class="team-logo">` : ''}
+          ${t.logo ? `<img src="${esc(t.logo)}" alt="${esc(t.name)}" class="team-logo">` : ''}
           <div>
-            <h3>${t.name}</h3>
-            <p><strong>Coach:</strong> ${t.head_coach || 'N/A'}</p>
+            <h3>${esc(t.name)} ${favStarHtml(t.id)}</h3>
+            <p><strong>Coach:</strong> ${esc(t.head_coach || 'N/A')}</p>
             <p><strong>Players:</strong> ${t.players?.length || 0}</p>
           </div>
         </div>
@@ -156,24 +204,34 @@ function displayRosters(teamId) {
     grid.querySelectorAll('.player-row').forEach(row => {
       row.addEventListener('click', () => openPlayer(row.dataset.playerId, { id: row.dataset.teamId, name: row.dataset.teamName }));
     });
+    wireFavStars(grid);
     return;
   }
 
-  teams.forEach(team => {
+  // Favorited teams render first.
+  const ordered = [
+    ...teams.filter(t => isFavorite(t.id)),
+    ...teams.filter(t => !isFavorite(t.id)),
+  ];
+  ordered.forEach(team => {
     const card = document.createElement('div');
-    card.className = 'card';
+    card.className = 'card team-card' + (isFavorite(team.id) ? ' favorited' : '');
     card.innerHTML = `
-      ${team.logo ? `<img src="${team.logo}" alt="${team.name}" class="team-logo">` : ''}
-      <h3>${team.name}</h3>
-      <p><strong>Coach:</strong> ${team.head_coach || 'N/A'}</p>
+      ${favStarHtml(team.id)}
+      ${team.logo ? `<img src="${esc(team.logo)}" alt="${esc(team.name)}" class="team-logo">` : ''}
+      <h3>${esc(team.name)}</h3>
+      <p><strong>Coach:</strong> ${esc(team.head_coach || 'N/A')}</p>
       <p><strong>Players:</strong> ${team.players?.length || 0}</p>
     `;
-    card.addEventListener('click', () => {
+    card.addEventListener('click', (e) => {
+      // Don't navigate when the star is clicked.
+      if (e.target.closest('.fav-star')) return;
       document.getElementById('teamFilter').value = team.id;
       displayRosters(team.id);
     });
     grid.appendChild(card);
   });
+  wireFavStars(grid);
 }
 
 // Schedule
@@ -181,11 +239,11 @@ let showPreviousGames = false;
 
 async function loadSchedule() {
   try {
-    if (!scheduleData.length) {
-      const res = await fetch(`${API_BASE}/schedule`);
-      const data = await res.json();
-      scheduleData = data.games || [];
-    }
+    // Always re-fetch — the API has a 60s server cache, so this is cheap and the user always
+    // sees current state (scores, status changes, postponements) instead of a page-lifetime stale copy.
+    const res = await fetch(`${API_BASE}/schedule`);
+    const data = await res.json();
+    scheduleData = data.games || [];
     displaySchedule(scheduleData);
   } catch (err) {
     document.getElementById('scheduleGrid').innerHTML = '<p>Error loading schedule.</p>';
@@ -227,31 +285,31 @@ function watchPillsHtml(watchOn = []) {
   if (!links.length) return '';
   return `<div class="watch-pills">` + links.map(l =>
     l.url
-      ? `<a class="watch-pill" href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`
-      : `<span class="watch-pill">${l.label}</span>`
+      ? `<a class="watch-pill" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a>`
+      : `<span class="watch-pill">${esc(l.label)}</span>`
   ).join('') + `</div>`;
 }
 
 function gameCardHtml(g) {
   const date = new Date(g.scheduled);
   const score = g.state === 'in' || g.state === 'post'
-    ? `<p class="score"><strong>${g.away_team?.abbreviation} ${g.away_team?.score} – ${g.home_team?.score} ${g.home_team?.abbreviation}</strong></p>`
+    ? `<p class="score"><strong>${esc(g.away_team?.abbreviation)} ${esc(g.away_team?.score)} – ${esc(g.home_team?.score)} ${esc(g.home_team?.abbreviation)}</strong></p>`
     : '';
   const liveDetail = g.state === 'in' && g.display_clock
-    ? ` · Q${g.period || ''} ${g.display_clock}`
+    ? ` · Q${esc(g.period || '')} ${esc(g.display_clock)}`
     : '';
   return `
     <div class="card game">
       <h3>
-        ${g.away_team?.logo ? `<img src="${g.away_team.logo}" class="team-logo-sm">` : ''}
-        ${g.away_team?.name} @
-        ${g.home_team?.logo ? `<img src="${g.home_team.logo}" class="team-logo-sm">` : ''}
-        ${g.home_team?.name}
+        ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" class="team-logo-sm">` : ''}
+        ${esc(g.away_team?.name)} @
+        ${g.home_team?.logo ? `<img src="${esc(g.home_team.logo)}" class="team-logo-sm">` : ''}
+        ${esc(g.home_team?.name)}
       </h3>
       <p><strong>${date.toLocaleDateString()}</strong> ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
-      <p>${g.venue?.name || ''}</p>
+      <p>${esc(g.venue?.name || '')}</p>
       ${score}
-      <p class="status">${g.status || ''}${liveDetail}</p>
+      <p class="status">${esc(g.status || '')}${liveDetail}</p>
       ${watchPillsHtml(g.watch_on)}
     </div>
   `;
@@ -301,7 +359,7 @@ function displaySchedule(games) {
   }
   if (buckets.upcoming.length) {
     html += `<h3 class="schedule-section">Upcoming</h3>`;
-    for (const g of buckets.upcoming.slice(0, 30)) html += gameCardHtml(g);
+    for (const g of buckets.upcoming) html += gameCardHtml(g);
   }
   if (!buckets.today.length && !buckets.tomorrow.length && !buckets.upcoming.length && !showPreviousGames) {
     html += `<p>No upcoming games scheduled.</p>`;
@@ -330,10 +388,10 @@ async function loadTrades() {
     }
     grid.innerHTML = items.map(t => `
       <div class="card trade">
-        ${t.image ? `<img src="${t.image}" class="news-img" alt="">` : ''}
-        <h3><a href="${t.link}" target="_blank" rel="noopener">${t.headline}</a></h3>
-        ${t.description ? `<p>${t.description}</p>` : ''}
-        <p class="meta"><small>${t.published ? new Date(t.published).toLocaleDateString() : ''} · ${t.source || 'ESPN'}</small></p>
+        ${t.image ? `<img src="${esc(t.image)}" class="news-img" alt="">` : ''}
+        <h3><a href="${esc(t.link)}" target="_blank" rel="noopener">${esc(t.headline)}</a></h3>
+        ${t.description ? `<p>${esc(t.description)}</p>` : ''}
+        <p class="meta"><small>${t.published ? new Date(t.published).toLocaleDateString() : ''} · ${esc(t.source || 'ESPN')}</small></p>
       </div>
     `).join('');
   } catch (err) {
@@ -353,9 +411,9 @@ async function loadCoaches() {
       const card = document.createElement('div');
       card.className = 'card';
       card.innerHTML = `
-        ${team.logo ? `<img src="${team.logo}" alt="${team.name}" class="team-logo">` : ''}
-        <h3>${team.head_coach || 'Coach TBA'}</h3>
-        <p><strong>Team:</strong> ${team.name}</p>
+        ${team.logo ? `<img src="${esc(team.logo)}" alt="${esc(team.name)}" class="team-logo">` : ''}
+        <h3>${esc(team.head_coach || 'Coach TBA')}</h3>
+        <p><strong>Team:</strong> ${esc(team.name)}</p>
       `;
       grid.appendChild(card);
     });
@@ -387,14 +445,17 @@ async function loadInjuries() {
     let html = '';
     for (const tn of teamNames) {
       const list = byTeam.get(tn).sort((a, b) => new Date(b.date) - new Date(a.date));
-      html += `<h3 class="schedule-section">${tn} (${list.length})</h3>`;
+      html += `<h3 class="schedule-section">${esc(tn)} (${list.length})</h3>`;
       for (const i of list) {
+        const detail = i.detail
+          ? ` · ${i.side ? esc(i.side) + ' ' : ''}${esc(i.detail)}`
+          : '';
         html += `
           <div class="card injury">
             ${headshotEl({ headshot: i.player?.headshot, name: i.player?.name })}
-            <h3>${i.player?.name || 'Unknown'} <small>(${i.player?.position || ''})</small></h3>
-            <p><strong>${i.status}</strong>${i.detail ? ` · ${i.side ? i.side + ' ' : ''}${i.detail}` : ''}</p>
-            ${i.short_comment ? `<p>${i.short_comment}</p>` : ''}
+            <h3>${esc(i.player?.name || 'Unknown')} <small>(${esc(i.player?.position || '')})</small></h3>
+            <p><strong>${esc(i.status)}</strong>${detail}</p>
+            ${i.short_comment ? `<p>${esc(i.short_comment)}</p>` : ''}
             <p class="meta"><small>${i.date ? new Date(i.date).toLocaleDateString() : ''}</small></p>
           </div>
         `;
@@ -431,11 +492,11 @@ async function searchPlayers(q) {
       return;
     }
     grid.innerHTML = players.map(p => `
-      <div class="card player" data-player-id="${p.id}">
+      <div class="card player" data-player-id="${esc(p.id)}">
         ${headshotEl(p)}
-        <h3>${p.name}</h3>
-        <p>${p.team_name} · ${p.position || ''} · #${p.jersey || '-'}</p>
-        <button data-player-id="${p.id}" data-team-id="${p.team_id}" data-team-name="${(p.team_name || '').replace(/"/g, '&quot;')}">View Stats</button>
+        <h3>${esc(p.name)}</h3>
+        <p>${esc(p.team_name)} · ${esc(p.position || '')} · #${esc(p.jersey || '-')}</p>
+        <button data-player-id="${esc(p.id)}" data-team-id="${esc(p.team_id)}" data-team-name="${esc(p.team_name || '')}">View Stats</button>
       </div>
     `).join('');
     grid.querySelectorAll('button[data-player-id]').forEach(b =>
@@ -502,35 +563,14 @@ async function openPlayer(playerId, team) {
   switchTab('stats');
   const grid = document.getElementById('statsGrid');
   grid.innerHTML = '<p>Loading player stats…</p>';
-  try {
-    const res = await fetch(`${API_BASE}/player/${playerId}`);
-    const { profile, stats } = await res.json();
-    const ath = profile?.athlete || profile;
-    const cats = stats?.categories || [];
-    const avg = cats.find(c => /averages/i.test(c.displayName || ''));
-    const totals = cats.find(c => /^regular season totals/i.test(c.displayName || ''));
-    const table = (cat) => {
-      if (!cat?.totals?.length) return '';
-      const labels = cat.names || [];
-      const vals = cat.totals || [];
-      const rows = labels.map((n, i) => `<tr><td title="${n}">${humanizeStat(n)}</td><td>${vals[i] ?? ''}</td></tr>`).join('');
-      return `<h4>${cat.displayName}</h4><table class="stats">${rows}</table>`;
-    };
-    const teamName = team?.name || ath?.team?.displayName || '';
-    const showTeamBack = team?.id && team?.name && team.name !== 'undefined';
-    const breadcrumb = showTeamBack
-      ? `<button class="back-btn" id="backToTeam">Back to ${teamName}</button>`
-      : `<button class="back-btn" id="backToSearch">Back to Search</button>`;
-    grid.innerHTML = `
-      ${breadcrumb}
-      <div class="card player-detail">
-        ${ath?.headshot?.href ? `<img src="${ath.headshot.href}" class="headshot-lg" alt="">` : `<span class="headshot-lg" style="display:grid;place-items:center;font-weight:950;color:var(--on-primary);background:linear-gradient(135deg,var(--secondary),var(--primary));">${initials(ath?.displayName || ath?.fullName)}</span>`}
-        <h2>${ath?.displayName || ath?.fullName || 'Player'}</h2>
-        <p>${ath?.position?.displayName || ''}${teamName ? ' · ' + teamName : ''}</p>
-        ${table(avg)}
-        ${table(totals)}
-      </div>
-    `;
+
+  const teamName = team?.name || '';
+  const showTeamBack = team?.id && team?.name && team.name !== 'undefined';
+  const breadcrumb = showTeamBack
+    ? `<button class="back-btn" id="backToTeam">Back to ${esc(teamName)}</button>`
+    : `<button class="back-btn" id="backToSearch">Back to Search</button>`;
+
+  const wireBack = () => {
     document.getElementById('backToTeam')?.addEventListener('click', () => {
       switchTab('rosters');
       const filter = document.getElementById('teamFilter');
@@ -542,8 +582,66 @@ async function openPlayer(playerId, team) {
       if (input.value.length >= 2) searchPlayers(input.value);
       else grid.innerHTML = '<p>Search for a player to view stats…</p>';
     });
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/player/${encodeURIComponent(playerId)}`);
+    const { profile, stats } = await res.json();
+    const ath = profile?.athlete || profile;
+    const cats = stats?.categories || [];
+
+    // ESPN sometimes returns null for either profile or stats. Render what we have, and fall back
+    // to a friendly message if there's nothing usable at all.
+    if (!ath && !cats.length) {
+      grid.innerHTML = `
+        ${breadcrumb}
+        <div class="card player-detail">
+          <h2>${esc(team?.playerName || 'Player')}</h2>
+          <p>We couldn't load this player's profile right now. ESPN's data may be missing or temporarily unavailable.</p>
+        </div>
+      `;
+      wireBack();
+      return;
+    }
+
+    const avg = cats.find(c => /averages/i.test(c.displayName || ''));
+    const totals = cats.find(c => /^regular season totals/i.test(c.displayName || ''));
+    const table = (cat) => {
+      if (!cat?.totals?.length) return '';
+      const labels = cat.names || [];
+      const vals = cat.totals || [];
+      const rows = labels.map((n, i) => `<tr><td title="${esc(n)}">${esc(humanizeStat(n))}</td><td>${esc(vals[i] ?? '')}</td></tr>`).join('');
+      return `<h4>${esc(cat.displayName)}</h4><table class="stats">${rows}</table>`;
+    };
+
+    const fullName = ath?.displayName || ath?.fullName || 'Player';
+    const displayTeam = teamName || ath?.team?.displayName || '';
+    const headshotHref = ath?.headshot?.href;
+    const headshot = headshotHref
+      ? `<img src="${esc(headshotHref)}" class="headshot-lg" alt="">`
+      : `<span class="headshot-lg" style="display:grid;place-items:center;font-weight:950;color:var(--on-primary);background:linear-gradient(135deg,var(--secondary),var(--primary));">${esc(initials(fullName))}</span>`;
+
+    const tables = (table(avg) || '') + (table(totals) || '');
+    const statsBlock = tables || '<p class="muted">No stat lines available for this player yet.</p>';
+
+    grid.innerHTML = `
+      ${breadcrumb}
+      <div class="card player-detail">
+        ${headshot}
+        <h2>${esc(fullName)}</h2>
+        <p>${esc(ath?.position?.displayName || '')}${displayTeam ? ' · ' + esc(displayTeam) : ''}</p>
+        ${statsBlock}
+      </div>
+    `;
+    wireBack();
   } catch (err) {
-    grid.innerHTML = '<p>Error loading player.</p>';
+    grid.innerHTML = `
+      ${breadcrumb}
+      <div class="card player-detail">
+        <p>Error loading player. Try again in a moment.</p>
+      </div>
+    `;
+    wireBack();
     console.error(err);
   }
 }
@@ -561,12 +659,58 @@ function showBanner(msg) {
 let liveGamesCache = [];
 let livePollTimer = null;
 
+function renderTodayStrip(games) {
+  const strip = document.getElementById('todayStrip');
+  if (!strip) return;
+  const live = games.filter(g => g.state === 'in');
+  const upcoming = games.filter(g => g.state === 'pre').sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
+  const finished = games.filter(g => g.state === 'post').sort((a, b) => new Date(b.scheduled) - new Date(a.scheduled));
+
+  const teamLabel = (t) => esc(t?.abbreviation || t?.name || '');
+
+  if (live.length) {
+    strip.dataset.state = 'live';
+    strip.innerHTML = live.slice(0, 3).map(g => `
+      <span class="today-chip is-live">
+        <span class="td-live-dot" aria-hidden="true"></span>
+        ${teamLabel(g.away_team)} <strong>${esc(g.away_team?.score)}</strong>
+        <span class="td-sep">–</span>
+        <strong>${esc(g.home_team?.score)}</strong> ${teamLabel(g.home_team)}
+        <em>Q${esc(g.period || '')} ${esc(g.display_clock || '')}</em>
+      </span>
+    `).join('');
+  } else if (upcoming.length) {
+    const next = upcoming[0];
+    const t = new Date(next.scheduled).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    strip.dataset.state = 'next';
+    strip.innerHTML = `
+      <span class="today-chip is-next">
+        Next today · <strong>${esc(t)}</strong> · ${teamLabel(next.away_team)} @ ${teamLabel(next.home_team)}
+      </span>
+    `;
+  } else if (finished.length) {
+    const last = finished[0];
+    strip.dataset.state = 'final';
+    strip.innerHTML = `
+      <span class="today-chip is-final">
+        Final · ${teamLabel(last.away_team)} <strong>${esc(last.away_team?.score)}</strong>
+        <span class="td-sep">–</span>
+        <strong>${esc(last.home_team?.score)}</strong> ${teamLabel(last.home_team)}
+      </span>
+    `;
+  } else {
+    strip.dataset.state = 'empty';
+    strip.innerHTML = `<span class="today-empty">No WNBA games today</span>`;
+  }
+}
+
 async function pollLive() {
   try {
     const res = await fetch(`${API_BASE}/live`);
     const data = await res.json();
     const games = data.games || [];
     liveGamesCache = games;
+    renderTodayStrip(games);
     const live = games.filter(g => g.state === 'in');
     const btn = document.getElementById('liveNowBtn');
     const count = document.getElementById('liveCount');
@@ -628,6 +772,7 @@ document.addEventListener('DOMContentLoaded', () => {
   startLivePolling();
 
   document.getElementById('liveNowBtn')?.addEventListener('click', showLiveModal);
+  document.getElementById('todayStrip')?.addEventListener('click', showLiveModal);
   document.getElementById('liveModalClose')?.addEventListener('click', hideLiveModal);
   document.getElementById('liveModal')?.addEventListener('click', (e) => {
     if (e.target.id === 'liveModal') hideLiveModal();

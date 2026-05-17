@@ -1310,11 +1310,24 @@ footer {
    ========================================================= */
 
 .live-now-bar {
-  width: min(calc(100% - 2rem), var(--max));
-  margin: 1rem auto 0;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  width: 100%;
+  margin: 0;
+  padding: 0.6rem 1rem;
   display: flex;
-  justify-content: center;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  background: rgba(255,255,255,0.86);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(16,17,22,0.08);
+  box-shadow: 0 6px 18px -12px rgba(16,17,22,0.25);
 }
+
+.live-now-bar > .live-now-btn { flex: 0 0 auto; }
 
 .live-now-btn {
   display: inline-flex;
@@ -1379,6 +1392,124 @@ footer {
 
 .live-now-btn[data-live="true"] .live-count {
   background: rgba(255,255,255,0.22);
+}
+
+/* Today strip — sits inside the sticky bar, shows tonight's slate at a glance. */
+.today-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.today-strip::-webkit-scrollbar { display: none; }
+
+.today-strip:hover { background: rgba(16,17,22,0.04); }
+
+.today-strip-loading,
+.today-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.today-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.today-chip .td-sep { opacity: 0.5; }
+.today-chip em {
+  font-style: normal;
+  opacity: 0.8;
+  font-weight: 700;
+  margin-left: 0.2rem;
+}
+.today-chip strong { font-weight: 1000; }
+
+.today-chip.is-live {
+  background: linear-gradient(135deg, #ff3344, #b40020);
+  color: white;
+  box-shadow: 0 6px 14px -6px rgba(255,51,68,0.55);
+}
+.today-chip.is-live .td-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.32);
+  animation: livePulse 1.4s var(--ease) infinite;
+}
+
+.today-chip.is-next {
+  background: rgba(16,17,22,0.08);
+  color: var(--ink);
+}
+
+.today-chip.is-final {
+  background: rgba(16,17,22,0.05);
+  color: var(--muted);
+}
+
+@media (max-width: 600px) {
+  .live-now-bar { padding: 0.5rem 0.6rem; gap: 0.5rem; }
+  .live-now-btn { padding: 0.55rem 0.85rem; font-size: 0.82rem; }
+  .today-chip { font-size: 0.78rem; padding: 0.28rem 0.6rem; }
+}
+
+/* Favorite star — pinned to the corner of team cards. */
+.fav-star {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,0.9);
+  border: 1px solid rgba(16,17,22,0.08);
+  border-radius: 999px;
+  color: rgba(16,17,22,0.4);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+  transition: transform 140ms var(--ease), color 140ms var(--ease), background 140ms var(--ease);
+}
+.fav-star:hover { transform: scale(1.08); color: var(--primary); }
+.fav-star.is-fav { color: #f5b301; background: #fff8dc; border-color: rgba(245,179,1,0.4); }
+
+.card.team-card { position: relative; }
+.card.team-card.favorited {
+  outline: 2px solid color-mix(in srgb, var(--primary) 55%, transparent);
+  outline-offset: 2px;
+}
+
+/* Star inside the single-team detail header should sit inline rather than absolute. */
+.team-header .fav-star {
+  position: static;
+  display: inline-grid;
+  vertical-align: middle;
+  margin-left: 0.4rem;
 }
 
 /* Modal */

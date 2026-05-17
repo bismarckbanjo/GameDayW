@@ -9,7 +9,10 @@ app.use(express.static('public'));
 const SITE = 'https://site.api.espn.com/apis/site/v2/sports/basketball/wnba';
 const SITE_WEB = 'https://site.web.api.espn.com/apis/v2/sports/basketball/wnba';
 const CORE = 'https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba';
-const SEASON = new Date().getFullYear();
+// WNBA season runs May–Oct. Before May, the "current" season is the previous calendar year
+// (Jan–Apr is offseason after that season's playoffs have wrapped).
+const _now = new Date();
+const SEASON = _now.getMonth() < 4 ? _now.getFullYear() - 1 : _now.getFullYear();
 
 const cache = new Map();
 async function cached(key, ttlMs, fn) {

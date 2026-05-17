@@ -1635,3 +1635,201 @@ footer {
   border-color: rgba(16,17,22,0.18);
   color: var(--muted);
 }
+
+/* Tappable game card — whole card opens ESPN's per-game page */
+.card.game.is-link { cursor: pointer; }
+.card.game.is-link:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+}
+.card.game.is-link:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 60%, transparent);
+  outline-offset: 3px;
+}
+
+/* Player detail — meta chips (Pos / # / Ht / From) */
+.meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin: 0.5rem 0 0.9rem;
+}
+.meta-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.32rem 0.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--secondary) 6%, white);
+  border: 1px solid rgba(16,17,22,0.08);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+.meta-chip em {
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 0.66rem;
+}
+.meta-chip strong {
+  color: var(--ink);
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Player detail — headline stat blocks (PPG / RPG / APG / FG%) */
+.headline-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.4rem 0 1rem;
+}
+.headline-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 0.4rem;
+  border-radius: 16px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--primary) 10%, white),
+    color-mix(in srgb, var(--secondary) 6%, white));
+  border: 1px solid rgba(16,17,22,0.06);
+  box-shadow: var(--shadow-sm);
+}
+.hs-label {
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hs-value {
+  font-size: 1.6rem;
+  font-weight: 1000;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 480px) {
+  .headline-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hs-value { font-size: 1.4rem; }
+}
+
+.player-sub {
+  text-align: center;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.full-stats {
+  margin-top: 0.8rem;
+}
+.full-stats > summary {
+  cursor: pointer;
+  padding: 0.55rem 0.8rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--secondary) 5%, white);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  list-style: none;
+}
+.full-stats > summary::-webkit-details-marker { display: none; }
+.full-stats > summary::after {
+  content: " ▾";
+  color: var(--muted);
+}
+.full-stats[open] > summary::after { content: " ▴"; }
+
+/* League leaders landing on Player Stats tab */
+.leaders-note {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0 0.2rem 0.3rem;
+}
+.leaders-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.leaders-card h3 {
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin-bottom: 0.7rem;
+  color: var(--ink);
+}
+.ldr-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+}
+.ldr-row {
+  display: grid;
+  grid-template-columns: 22px 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.42rem 0.5rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  transition: background 160ms var(--ease), border-color 160ms var(--ease), transform 160ms var(--ease);
+}
+.ldr-row.is-link { cursor: pointer; }
+.ldr-row.is-link:hover {
+  background: color-mix(in srgb, var(--primary) 7%, white);
+  border-color: color-mix(in srgb, var(--primary) 24%, transparent);
+  transform: translateX(2px);
+}
+.ldr-rank {
+  font-weight: 950;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.ldr-head {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 14%, white), white);
+}
+.ldr-head-init {
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  font-size: 0.75rem;
+  color: var(--ink);
+}
+.ldr-name {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ldr-team {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.ldr-val {
+  font-weight: 1000;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: color-mix(in srgb, var(--primary) 70%, var(--ink));
+}

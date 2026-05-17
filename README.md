@@ -5,14 +5,13 @@ A sleek, easy-to-use WNBA lookup app. Built for fans who are tired of sifting th
 ## Features
 
 - **Tonight's Games** — sticky strip with live scores and what's on tonight
-- **Live Now** — modal with everything happening today (in progress, upcoming, finished)
-- **Favorites** — star your teams; they surface first on the Rosters tab
+- **Live Now** — modal with everything happening today (in progress, upcoming, finished). Game cards open the ESPN boxscore.
+- **Favorites** — star your teams; they surface first on Rosters and default-filter Schedule + Injuries
 - **Rosters** — browse every WNBA team and player
-- **Schedule** — full season, bucketed by Today / Tomorrow / Upcoming
-- **Player Stats** — search any player, see season averages and totals
+- **Schedule** — full season, bucketed by Today / Tomorrow / month; cards link to ESPN
+- **Player Stats** — lands on league leaders (PPG / RPG / APG / FG%); search any player to see season averages, totals, height, and college
 - **Coaches** — head coach by team
 - **Injuries** — grouped by team, sorted by date
-- **Trades & Waivers** — recent transaction headlines
 - **Team Skins** — recolor the UI in your favorite team's palette
 
 ## Tech Stack
@@ -64,7 +63,8 @@ All endpoints proxy ESPN with server-side caching (TTL in parentheses):
 - `GET /api/player/:playerId` — profile + season stats (no cache)
 - `GET /api/players/search?q=` — name search across every roster (no cache)
 - `GET /api/injuries` — grouped injury report (10m)
-- `GET /api/transactions` — headline filter of league news (15m)
+- `GET /api/leaders` — league leaders in PPG / RPG / APG / FG% (1h), powers the Player Stats landing
+- `GET /api/transactions` — headline filter of league news (15m) — endpoint kept but UI tab is hidden
 - `GET /api/standings` — raw ESPN standings (5m) — not yet wired into the UI
 
 ## Notes

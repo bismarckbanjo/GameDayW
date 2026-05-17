@@ -157,6 +157,65 @@ async function fetchStandings() {
   });
 }
 
+// Stat categories surfaced on the Player Stats landing screen.
+// Display order is the array order.
+const LEADER_CATS = [
+  { name: 'pointsPerGame',    label: 'Points / Game' },
+  { name: 'reboundsPerGame',  label: 'Rebounds / Game' },
+  { name: 'assistsPerGame',   label: 'Assists / Game' },
+  { name: 'fieldGoalPercentage', label: 'Field Goal %' },
+];
+
+async function fetchLeadersForSeason(season, rosterIndex) {
+  const url = `${CORE}/seasons/${season}/types/2/leaders?limit=10`;
+  const raw = await getJson(url);
+  const cats = raw.categories || [];
+  const byName = new Map(cats.map(c => [c.name, c]));
+  const out = [];
+  for (const want of LEADER_CATS) {
+    const c = byName.get(want.name);
+    if (!c) continue;
+    const leaders = [];
+    for (const l of (c.leaders || []).slice(0, 5)) {
+      const refUrl = l.athlete?.$ref || '';
+      const m = refUrl.match(/\/athletes\/(\d+)/);
+      const id = m ? m[1] : null;
+      const hint = id ? rosterIndex.get(id) : null;
+      leaders.push({
+        id,
+        name: hint?.name || null,
+        headshot: hint?.headshot || null,
+        team_id: hint?.team_id || null,
+        team_name: hint?.team_name || null,
+        value: l.displayValue ?? (l.value != null ? String(l.value) : ''),
+      });
+    }
+    if (leaders.length) out.push({ name: want.name, label: want.label, leaders });
+  }
+  return out;
+}
+
+async function fetchLeaders() {
+  return cached('leaders', 60 * 60 * 1000, async () => {
+    const teams = await fetchTeamsWithRosters();
+    // Build an id→player map so we can resolve athlete refs without follow-up fetches.
+    const rosterIndex = new Map();
+    for (const t of teams) {
+      for (const p of t.players || []) {
+        if (p.id) rosterIndex.set(String(p.id), { name: p.name, headshot: p.headshot, team_id: t.id, team_name: t.name });
+      }
+    }
+    let out = await fetchLeadersForSeason(SEASON, rosterIndex).catch(() => []);
+    // In deep offseason or right at the start of a season the current-season feed can be empty.
+    // Fall back to the prior season so the page never blanks out.
+    if (!out.length && SEASON > 2020) {
+      out = await fetchLeadersForSeason(SEASON - 1, rosterIndex).catch(() => []);
+      if (out.length) out.unshift({ name: '_season_note', label: `${SEASON - 1} Season`, leaders: [] });
+    }
+    return out;
+  });
+}
+
 app.get('/api/teams', async (_req, res) => {
   try {
     const teams = await fetchTeamsWithRosters();
@@ -198,6 +257,15 @@ app.get('/api/live', async (_req, res) => {
 app.get('/api/standings', async (_req, res) => {
   try {
     res.json(await fetchStandings());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/leaders', async (_req, res) => {
+  try {
+    const categories = await fetchLeaders();
+    res.json({ categories });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

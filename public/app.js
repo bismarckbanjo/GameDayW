@@ -38,6 +38,14 @@ function favStarHtml(teamId) {
   const label = fav ? 'Remove from favorites' : 'Add to favorites';
   return `<button class="fav-star ${fav ? 'is-fav' : ''}" data-fav-team="${esc(teamId)}" aria-label="${label}" title="${label}" type="button">${fav ? '★' : '☆'}</button>`;
 }
+// Name of the user's first favorite team, or '' if none. Used to pre-filter
+// the Schedule and Injuries tabs so the app opens on the team the fan cares about.
+function firstFavoriteTeamName() {
+  const favs = getFavorites();
+  if (!favs.size) return '';
+  for (const t of teamsData) if (favs.has(String(t.id))) return t.name;
+  return '';
+}
 function wireFavStars(root) {
   root.querySelectorAll('.fav-star').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -103,12 +111,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', (e) => switchTab(e.currentTarget.dataset.tab));
 });
 
-function switchTab(tabName) {
+function switchTab(tabName, opts = {}) {
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(tabName).classList.add('active');
-  loadTabData(tabName);
+  // openPlayer drives its own fetch — it passes { noLoad: true } so we don't race the leaders fetch
+  // against the player-detail render.
+  if (!opts.noLoad) loadTabData(tabName);
 }
 
 async function loadTabData(tabName) {
@@ -116,7 +126,7 @@ async function loadTabData(tabName) {
     switch (tabName) {
       case 'rosters': await loadRosters(); break;
       case 'schedule': await loadSchedule(); break;
-      case 'trades': await loadTrades(); break;
+      case 'stats': await loadStatsLanding(); break;
       case 'coaches': await loadCoaches(); break;
       case 'injuries': await loadInjuries(); break;
     }
@@ -175,7 +185,15 @@ function displayRosters(teamId) {
   if (teamId) {
     const t = teams[0];
     const playerRows = (t.players || []).map(p => `
-      <div class="player-row" data-player-id="${esc(p.id)}" data-team-id="${esc(t.id)}" data-team-name="${esc(t.name)}">
+      <div class="player-row"
+        data-player-id="${esc(p.id)}"
+        data-team-id="${esc(t.id)}"
+        data-team-name="${esc(t.name)}"
+        data-player-name="${esc(p.name || '')}"
+        data-jersey="${esc(p.jersey || '')}"
+        data-position="${esc(p.position || '')}"
+        data-height="${esc(p.height || '')}"
+        data-college="${esc(p.college || '')}">
         ${headshotEl(p)}
         <span class="jersey">${esc(p.jersey || '-')}</span>
         <span class="name">${esc(p.name)}</span>
@@ -202,7 +220,15 @@ function displayRosters(teamId) {
       displayRosters('');
     });
     grid.querySelectorAll('.player-row').forEach(row => {
-      row.addEventListener('click', () => openPlayer(row.dataset.playerId, { id: row.dataset.teamId, name: row.dataset.teamName }));
+      row.addEventListener('click', () => openPlayer(row.dataset.playerId,
+        { id: row.dataset.teamId, name: row.dataset.teamName },
+        {
+          name: row.dataset.playerName,
+          jersey: row.dataset.jersey,
+          position: row.dataset.position,
+          height: row.dataset.height,
+          college: row.dataset.college,
+        }));
     });
     wireFavStars(grid);
     return;
@@ -238,6 +264,8 @@ function displayRosters(teamId) {
 let showPreviousGames = false;
 let scheduleTeamName = '';
 let scheduleSortOrder = 'soonest'; // 'soonest' | 'latest'
+let scheduleFavApplied = false;
+let injuriesFavApplied = false;
 
 // Real WNBA teams come from /api/teams. Anything else in the schedule (e.g., a national
 // team like NIGERIA in a preseason exhibition) gets a "Special" tag. TBD is its own case.
@@ -271,6 +299,12 @@ async function loadSchedule() {
 function populateScheduleTeamFilter() {
   const sel = document.getElementById('scheduleTeamFilter');
   if (!sel || sel.dataset.populated === '1') return;
+  // First visit with a favorite: open on that team's slate.
+  if (!scheduleFavApplied) {
+    const fav = firstFavoriteTeamName();
+    if (fav) scheduleTeamName = fav;
+    scheduleFavApplied = true;
+  }
   // Dedupe by name — ESPN ships TBD with multiple IDs (-1, -2), and the dropdown values
   // become names so the filter naturally matches every variant.
   const byName = new Map();
@@ -357,8 +391,13 @@ function gameCardHtml(g) {
   const liveDetail = g.state === 'in' && g.display_clock
     ? ` · Q${esc(g.period || '')} ${esc(g.display_clock)}`
     : '';
+  // Whole card links to ESPN's per-game page. Watch-pill anchors inside stop propagation
+  // (see wireGameCardLinks) so users can still tap a broadcaster directly.
+  const espnUrl = g.id ? `https://www.espn.com/wnba/game/_/gameId/${esc(g.id)}` : '';
+  const linkAttr = espnUrl ? `data-game-url="${espnUrl}" role="link" tabindex="0"` : '';
+  const linkClass = espnUrl ? ' is-link' : '';
   return `
-    <div class="card game">
+    <div class="card game${linkClass}" ${linkAttr}>
       <h3>
         ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" class="team-logo-sm">` : ''}
         ${esc(g.away_team?.name)}${specialTagHtml(g.away_team)} @
@@ -374,6 +413,23 @@ function gameCardHtml(g) {
   `;
 }
 
+function wireGameCardLinks(root) {
+  root.querySelectorAll('.card.game.is-link').forEach(card => {
+    const open = () => {
+      const url = card.dataset.gameUrl;
+      if (url) window.open(url, '_blank', 'noopener');
+    };
+    card.addEventListener('click', (e) => {
+      // Let the inner watch-pill anchors handle their own clicks.
+      if (e.target.closest('a')) return;
+      open();
+    });
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+  });
+}
+
 function displaySchedule() {
   const grid = document.getElementById('scheduleGrid');
   grid.innerHTML = '';
@@ -383,7 +439,7 @@ function displaySchedule() {
     : scheduleData;
 
   if (!games.length) {
-    grid.innerHTML = scheduleTeamId
+    grid.innerHTML = scheduleTeamName
       ? '<p>No games found for this team.</p>'
       : '<p>No games found.</p>';
     return;
@@ -471,32 +527,7 @@ function displaySchedule() {
       displaySchedule();
     });
   });
-}
-
-// Trades / transactions
-async function loadTrades() {
-  const grid = document.getElementById('tradesGrid');
-  grid.innerHTML = '<p>Loading transactions…</p>';
-  try {
-    const res = await fetch(`${API_BASE}/transactions`);
-    const data = await res.json();
-    const items = data.transactions || [];
-    if (!items.length) {
-      grid.innerHTML = '<p>No recent transaction headlines.</p>';
-      return;
-    }
-    grid.innerHTML = items.map(t => `
-      <div class="card trade">
-        ${t.image ? `<img src="${esc(t.image)}" class="news-img" alt="">` : ''}
-        <h3><a href="${esc(t.link)}" target="_blank" rel="noopener">${esc(t.headline)}</a></h3>
-        ${t.description ? `<p>${esc(t.description)}</p>` : ''}
-        <p class="meta"><small>${t.published ? new Date(t.published).toLocaleDateString() : ''} · ${esc(t.source || 'ESPN')}</small></p>
-      </div>
-    `).join('');
-  } catch (err) {
-    grid.innerHTML = '<p>Error loading transactions.</p>';
-    console.error('Transactions Error:', err);
-  }
+  wireGameCardLinks(grid);
 }
 
 // Coaches
@@ -544,6 +575,11 @@ async function loadInjuries() {
 function populateInjuriesTeamFilter() {
   const sel = document.getElementById('injuriesTeamFilter');
   if (!sel || sel.dataset.populated === '1') return;
+  if (!injuriesFavApplied) {
+    const fav = firstFavoriteTeamName();
+    if (fav) injuriesTeamName = fav;
+    injuriesFavApplied = true;
+  }
   // Source from teamsData so the dropdown only lists real WNBA teams, even if a team
   // currently has zero reported injuries.
   [...teamsData]
@@ -609,11 +645,79 @@ document.getElementById('playerSearch')?.addEventListener('input', (e) => {
   clearTimeout(searchTimer);
   const q = e.target.value.trim();
   if (q.length < 2) {
-    document.getElementById('statsGrid').innerHTML = '<p>Search for a player to view stats…</p>';
+    // Empty search returns the fan to the league-leaders board rather than a blank prompt.
+    loadStatsLanding();
     return;
   }
   searchTimer = setTimeout(() => searchPlayers(q), 250);
 });
+
+// League leaders board — what the Player Stats tab opens to before any search.
+let leadersData = null;
+async function loadStatsLanding() {
+  const grid = document.getElementById('statsGrid');
+  const search = document.getElementById('playerSearch');
+  if (search && search.value.trim().length >= 2) return; // user is mid-search; don't clobber
+  grid.innerHTML = '<p>Loading league leaders…</p>';
+  try {
+    if (!leadersData) {
+      // ensureTeams runs in parallel — we need it cached so the meta chips (Ht/From) can fill
+      // in when a fan opens a leader directly.
+      const [res] = await Promise.all([fetch(`${API_BASE}/leaders`), ensureTeams()]);
+      const data = await res.json();
+      leadersData = data.categories || [];
+    }
+    renderStatsLanding(leadersData);
+  } catch (err) {
+    grid.innerHTML = '<p>Search for a player to view stats…</p>';
+    console.error('Leaders Error:', err);
+  }
+}
+
+function renderStatsLanding(categories) {
+  const grid = document.getElementById('statsGrid');
+  const real = categories.filter(c => c.name !== '_season_note');
+  if (!real.length) {
+    grid.innerHTML = '<p>Search for a player to view stats…</p>';
+    return;
+  }
+  const note = categories.find(c => c.name === '_season_note');
+  const noteHtml = note ? `<p class="leaders-note">Showing ${esc(note.label)} (current season not started).</p>` : '';
+  const cols = real.map(cat => {
+    const rows = cat.leaders.map((l, i) => {
+      const clickable = !!l.id;
+      const nameHtml = l.name ? esc(l.name) : 'Player';
+      const team = l.team_name ? `<span class="ldr-team">${esc(l.team_name)}</span>` : '';
+      const head = l.headshot
+        ? `<img src="${esc(l.headshot)}" alt="" class="ldr-head">`
+        : `<span class="ldr-head ldr-head-init">${esc(initials(l.name || ''))}</span>`;
+      return `
+        <li class="ldr-row${clickable ? ' is-link' : ''}"
+            ${clickable ? `data-player-id="${esc(l.id)}" data-team-id="${esc(l.team_id || '')}" data-team-name="${esc(l.team_name || '')}" data-player-name="${esc(l.name || '')}"` : ''}>
+          <span class="ldr-rank">${i + 1}</span>
+          ${head}
+          <span class="ldr-name">${nameHtml}${team}</span>
+          <strong class="ldr-val">${esc(l.value)}</strong>
+        </li>
+      `;
+    }).join('');
+    return `
+      <div class="card leaders-card">
+        <h3>${esc(cat.label)}</h3>
+        <ol class="ldr-list">${rows}</ol>
+      </div>
+    `;
+  }).join('');
+  grid.innerHTML = `
+    ${noteHtml}
+    <div class="leaders-grid">${cols}</div>
+  `;
+  grid.querySelectorAll('.ldr-row.is-link').forEach(row => {
+    row.addEventListener('click', () => openPlayer(row.dataset.playerId,
+      { id: row.dataset.teamId, name: row.dataset.teamName },
+      { name: row.dataset.playerName }));
+  });
+}
 
 async function searchPlayers(q) {
   const grid = document.getElementById('statsGrid');
@@ -631,11 +735,27 @@ async function searchPlayers(q) {
         ${headshotEl(p)}
         <h3>${esc(p.name)}</h3>
         <p>${esc(p.team_name)} · ${esc(p.position || '')} · #${esc(p.jersey || '-')}</p>
-        <button data-player-id="${esc(p.id)}" data-team-id="${esc(p.team_id)}" data-team-name="${esc(p.team_name || '')}">View Stats</button>
+        <button
+          data-player-id="${esc(p.id)}"
+          data-team-id="${esc(p.team_id)}"
+          data-team-name="${esc(p.team_name || '')}"
+          data-player-name="${esc(p.name || '')}"
+          data-jersey="${esc(p.jersey || '')}"
+          data-position="${esc(p.position || '')}"
+          data-height="${esc(p.height || '')}"
+          data-college="${esc(p.college || '')}">View Stats</button>
       </div>
     `).join('');
     grid.querySelectorAll('button[data-player-id]').forEach(b =>
-      b.addEventListener('click', () => openPlayer(b.dataset.playerId, { id: b.dataset.teamId, name: b.dataset.teamName }))
+      b.addEventListener('click', () => openPlayer(b.dataset.playerId,
+        { id: b.dataset.teamId, name: b.dataset.teamName },
+        {
+          name: b.dataset.playerName,
+          jersey: b.dataset.jersey,
+          position: b.dataset.position,
+          height: b.dataset.height,
+          college: b.dataset.college,
+        }))
     );
   } catch (err) {
     grid.innerHTML = '<p>Search error.</p>';
@@ -694,16 +814,56 @@ function humanizeStat(key) {
   return spaced;
 }
 
-async function openPlayer(playerId, team) {
-  switchTab('stats');
+// Pull a single value out of a stats category by stat key (e.g. 'avgPoints').
+function statByName(cat, name) {
+  if (!cat) return null;
+  const i = (cat.names || []).indexOf(name);
+  if (i < 0) return null;
+  const v = cat.totals?.[i];
+  return v == null || v === '' ? null : v;
+}
+
+function metaChipHtml(label, value) {
+  if (!value) return '';
+  return `<span class="meta-chip"><em>${esc(label)}</em><strong>${esc(value)}</strong></span>`;
+}
+
+function headlineStatHtml(label, value) {
+  if (value == null || value === '') return '';
+  return `<div class="headline-stat"><span class="hs-label">${esc(label)}</span><strong class="hs-value">${esc(value)}</strong></div>`;
+}
+
+// Look up height/college/jersey/position from the cached rosters when hints are sparse
+// (e.g. opening a player from the leaders board).
+function enrichHintsFromRoster(playerId, hints) {
+  const out = { ...(hints || {}) };
+  if (out.height && out.college && out.jersey && out.position) return out;
+  if (!teamsData.length) return out;
+  const id = String(playerId);
+  for (const t of teamsData) {
+    const p = (t.players || []).find(x => String(x.id) === id);
+    if (!p) continue;
+    out.name ||= p.name;
+    out.height ||= p.height;
+    out.college ||= p.college;
+    out.jersey ||= p.jersey;
+    out.position ||= p.position;
+    return out;
+  }
+  return out;
+}
+
+async function openPlayer(playerId, team, hints) {
+  switchTab('stats', { noLoad: true });
   const grid = document.getElementById('statsGrid');
   grid.innerHTML = '<p>Loading player stats…</p>';
+  hints = enrichHintsFromRoster(playerId, hints);
 
   const teamName = team?.name || '';
   const showTeamBack = team?.id && team?.name && team.name !== 'undefined';
   const breadcrumb = showTeamBack
     ? `<button class="back-btn" id="backToTeam">Back to ${esc(teamName)}</button>`
-    : `<button class="back-btn" id="backToSearch">Back to Search</button>`;
+    : `<button class="back-btn" id="backToSearch">Back to Stats</button>`;
 
   const wireBack = () => {
     document.getElementById('backToTeam')?.addEventListener('click', () => {
@@ -714,8 +874,8 @@ async function openPlayer(playerId, team) {
     });
     document.getElementById('backToSearch')?.addEventListener('click', () => {
       const input = document.getElementById('playerSearch');
-      if (input.value.length >= 2) searchPlayers(input.value);
-      else grid.innerHTML = '<p>Search for a player to view stats…</p>';
+      if (input && input.value.length >= 2) searchPlayers(input.value);
+      else loadStatsLanding();
     });
   };
 
@@ -727,11 +887,11 @@ async function openPlayer(playerId, team) {
 
     // ESPN sometimes returns null for either profile or stats. Render what we have, and fall back
     // to a friendly message if there's nothing usable at all.
-    if (!ath && !cats.length) {
+    if (!ath && !cats.length && !hints?.name) {
       grid.innerHTML = `
         ${breadcrumb}
         <div class="card player-detail">
-          <h2>${esc(team?.playerName || 'Player')}</h2>
+          <h2>Player</h2>
           <p>We couldn't load this player's profile right now. ESPN's data may be missing or temporarily unavailable.</p>
         </div>
       `;
@@ -749,23 +909,56 @@ async function openPlayer(playerId, team) {
       return `<h4>${esc(cat.displayName)}</h4><table class="stats">${rows}</table>`;
     };
 
-    const fullName = ath?.displayName || ath?.fullName || 'Player';
+    const fullName = ath?.displayName || ath?.fullName || hints?.name || 'Player';
     const displayTeam = teamName || ath?.team?.displayName || '';
     const headshotHref = ath?.headshot?.href;
     const headshot = headshotHref
       ? `<img src="${esc(headshotHref)}" class="headshot-lg" alt="">`
       : `<span class="headshot-lg" style="display:grid;place-items:center;font-weight:950;color:var(--on-primary);background:linear-gradient(135deg,var(--secondary),var(--primary));">${esc(initials(fullName))}</span>`;
 
+    // Meta row — what fans actually want to see at a glance.
+    // Height is non-negotiable per design intent; college comes from roster hints
+    // (ESPN's athlete profile returns college as a $ref so we lean on the cached roster).
+    const position = ath?.position?.abbreviation || hints?.position || '';
+    const positionLong = ath?.position?.displayName || '';
+    const jersey = ath?.jersey || hints?.jersey || '';
+    const height = ath?.displayHeight || hints?.height || '';
+    const college = hints?.college || '';
+    const meta = [
+      metaChipHtml('Pos', position || positionLong),
+      jersey ? metaChipHtml('#', String(jersey).replace(/^#/, '')) : '',
+      metaChipHtml('Ht', height),
+      metaChipHtml('From', college),
+    ].filter(Boolean).join('');
+    const metaRow = meta ? `<div class="meta-chips">${meta}</div>` : '';
+
+    // Headline stat chips. Prefer per-game from "averages"; fall back to totals for FG%.
+    const ppg = statByName(avg, 'avgPoints');
+    const rpg = statByName(avg, 'avgRebounds');
+    const apg = statByName(avg, 'avgAssists');
+    const fgPct = statByName(avg, 'fieldGoalPct') || statByName(totals, 'fieldGoalPct');
+    const headline = [
+      headlineStatHtml('PPG', ppg),
+      headlineStatHtml('RPG', rpg),
+      headlineStatHtml('APG', apg),
+      headlineStatHtml('FG%', fgPct),
+    ].filter(Boolean).join('');
+    const headlineRow = headline ? `<div class="headline-stats">${headline}</div>` : '';
+
     const tables = (table(avg) || '') + (table(totals) || '');
-    const statsBlock = tables || '<p class="muted">No stat lines available for this player yet.</p>';
+    const detailsBlock = tables
+      ? `<details class="full-stats"><summary>Full stat lines</summary>${tables}</details>`
+      : (headlineRow ? '' : '<p class="muted">No stat lines available for this player yet.</p>');
 
     grid.innerHTML = `
       ${breadcrumb}
       <div class="card player-detail">
         ${headshot}
         <h2>${esc(fullName)}</h2>
-        <p>${esc(ath?.position?.displayName || '')}${displayTeam ? ' · ' + esc(displayTeam) : ''}</p>
-        ${statsBlock}
+        <p class="player-sub">${esc(positionLong || position || '')}${displayTeam ? ' · ' + esc(displayTeam) : ''}</p>
+        ${metaRow}
+        ${headlineRow}
+        ${detailsBlock}
       </div>
     `;
     wireBack();
@@ -898,9 +1091,14 @@ async function pollLive() {
 }
 
 function startLivePolling() {
+  if (document.hidden) return;
   pollLive();
   if (livePollTimer) clearInterval(livePollTimer);
   livePollTimer = setInterval(pollLive, 30000);
+}
+
+function stopLivePolling() {
+  if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; }
 }
 
 function showLiveModal() {
@@ -956,6 +1154,7 @@ function showLiveModal() {
   }
 
   body.innerHTML = html;
+  wireGameCardLinks(body);
   modal.classList.remove('hidden');
   // Always land at the top when (re)opening, so the close button is in reach.
   modal.querySelector('.modal-content')?.scrollTo({ top: 0 });
@@ -978,5 +1177,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') hideLiveModal();
+  });
+  // Stop the 30s scoreboard poll while the tab is backgrounded — saves battery and data on mobile.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopLivePolling();
+    else startLivePolling();
   });
 });

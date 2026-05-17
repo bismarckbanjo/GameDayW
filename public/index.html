@@ -27,34 +27,27 @@
           </span>
         </a>
 
+        <div class="global-search" id="globalSearch">
+          <span class="global-search-icon" aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            id="globalSearchInput"
+            class="global-search-input"
+            placeholder="Search players, teams, coaches…"
+            autocomplete="off"
+            aria-label="Search players, teams, and coaches"
+            aria-controls="globalSearchResults"
+            aria-expanded="false"
+          />
+          <div id="globalSearchResults" class="global-search-results hidden" role="listbox"></div>
+        </div>
+
         <div class="theme-picker">
           <label for="themeSelect">Team skin</label>
           <select id="themeSelect"></select>
         </div>
       </div>
 
-      <section class="hero-card">
-        <div class="hero-copy">
-          <span class="eyebrow">Roster intelligence • schedule tracking • player lookup</span>
-          <h1>Nothin' but net</h1>
-        </div>
-
-        <div class="hero-visual" aria-hidden="true">
-          <div class="ball-orbit"></div>
-          <div class="stat-chip chip-one">
-            <span>PPG</span>
-            <strong>24.7</strong>
-          </div>
-          <div class="stat-chip chip-two">
-            <span>AST</span>
-            <strong>8.1</strong>
-          </div>
-          <div class="stat-chip chip-three">
-            <span>REB</span>
-            <strong>10.4</strong>
-          </div>
-        </div>
-      </section>
     </header>
 
     <div class="live-now-bar">

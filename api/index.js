@@ -158,6 +158,27 @@ async function fetchStandings() {
   });
 }
 
+// teamId -> "W-L" (e.g. "30-14"). Pulled from the standings "overall" stat.
+async function fetchTeamRecords() {
+  return cached('team_records', 5 * 60 * 1000, async () => {
+    const map = new Map();
+    try {
+      const data = await fetchStandings();
+      for (const child of data.children || []) {
+        for (const entry of child.standings?.entries || []) {
+          const id = entry.team?.id;
+          if (!id) continue;
+          const overall = (entry.stats || []).find(s => s.name === 'overall');
+          if (overall?.displayValue) map.set(String(id), overall.displayValue);
+        }
+      }
+    } catch {
+      // Offseason / standings endpoint hiccup — return whatever we collected (possibly empty).
+    }
+    return map;
+  });
+}
+
 // Stat categories surfaced on the Player Stats landing screen.
 // Display order is the array order.
 const LEADER_CATS = [
@@ -219,8 +240,8 @@ async function fetchLeaders() {
 
 app.get('/api/teams', async (_req, res) => {
   try {
-    const teams = await fetchTeamsWithRosters();
-    res.json({ teams });
+    const [teams, records] = await Promise.all([fetchTeamsWithRosters(), fetchTeamRecords()]);
+    res.json({ teams: teams.map(t => ({ ...t, record: records.get(String(t.id)) || null })) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -228,10 +249,10 @@ app.get('/api/teams', async (_req, res) => {
 
 app.get('/api/team/:teamId', async (req, res) => {
   try {
-    const teams = await fetchTeamsWithRosters();
+    const [teams, records] = await Promise.all([fetchTeamsWithRosters(), fetchTeamRecords()]);
     const team = teams.find(t => t.id === req.params.teamId);
     if (!team) return res.status(404).json({ error: 'team not found' });
-    res.json({ team });
+    res.json({ team: { ...team, record: records.get(String(team.id)) || null } });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

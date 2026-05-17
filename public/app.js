@@ -111,6 +111,31 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', (e) => switchTab(e.currentTarget.dataset.tab));
 });
 
+// --- URL routing -------------------------------------------------------------
+// State is mirrored into the query string so deep links (?tab=schedule&team=Indiana%20Fever,
+// ?tab=stats&player=4433403) are shareable and the browser back button works the way fans expect.
+const KNOWN_TABS = new Set(['rosters', 'schedule', 'stats', 'coaches', 'injuries', 'trades']);
+let suppressHistory = false; // true while restoring from popstate to avoid feedback loops
+
+function buildSearch(state) {
+  const sp = new URLSearchParams();
+  if (state.tab) sp.set('tab', state.tab);
+  if (state.team) sp.set('team', state.team);
+  if (state.player) sp.set('player', state.player);
+  if (state.teamId) sp.set('teamId', state.teamId);
+  if (state.teamName) sp.set('teamName', state.teamName);
+  const s = sp.toString();
+  return s ? `?${s}` : location.pathname;
+}
+
+function pushUrlState(state, { replace = false } = {}) {
+  if (suppressHistory) return;
+  const url = buildSearch(state);
+  if (url === (location.search || location.pathname)) return;
+  if (replace) history.replaceState(state, '', url);
+  else history.pushState(state, '', url);
+}
+
 function switchTab(tabName, opts = {}) {
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -119,6 +144,7 @@ function switchTab(tabName, opts = {}) {
   // openPlayer drives its own fetch — it passes { noLoad: true } so we don't race the leaders fetch
   // against the player-detail render.
   if (!opts.noLoad) loadTabData(tabName);
+  if (!opts.skipHistory) pushUrlState({ tab: tabName });
 }
 
 async function loadTabData(tabName) {
@@ -182,6 +208,7 @@ function displayRosters(teamId) {
   const grid = document.getElementById('rostersGrid');
   grid.innerHTML = '';
   const teams = teamId ? teamsData.filter(t => t.id === teamId) : teamsData;
+  pushUrlState(teamId ? { tab: 'rosters', team: teamId } : { tab: 'rosters' });
 
   if (teamId) {
     const t = teams[0];
@@ -209,6 +236,7 @@ function displayRosters(teamId) {
           ${t.logo ? `<img src="${esc(t.logo)}" alt="${esc(t.name)}" class="team-logo">` : ''}
           <div>
             <h3>${esc(t.name)} ${favStarHtml(t.id)}</h3>
+            ${t.record ? `<p class="team-record">${esc(t.record)}</p>` : ''}
             <p><strong>Coach:</strong> ${esc(t.head_coach || 'N/A')}</p>
             <p><strong>Players:</strong> ${t.players?.length || 0}</p>
           </div>
@@ -247,6 +275,7 @@ function displayRosters(teamId) {
       ${favStarHtml(team.id)}
       ${team.logo ? `<img src="${esc(team.logo)}" alt="${esc(team.name)}" class="team-logo">` : ''}
       <h3>${esc(team.name)}</h3>
+      ${team.record ? `<p class="team-record">${esc(team.record)}</p>` : ''}
       <p><strong>Coach:</strong> ${esc(team.head_coach || 'N/A')}</p>
       <p><strong>Players:</strong> ${team.players?.length || 0}</p>
     `;
@@ -332,6 +361,7 @@ function populateScheduleTeamFilter() {
   sel.addEventListener('change', (e) => {
     scheduleTeamName = e.target.value;
     displaySchedule();
+    pushUrlState(scheduleTeamName ? { tab: 'schedule', team: scheduleTeamName } : { tab: 'schedule' });
   });
   const sortSel = document.getElementById('scheduleSort');
   if (sortSel && sortSel.dataset.wired !== '1') {
@@ -392,13 +422,14 @@ function gameCardHtml(g) {
   const liveDetail = g.state === 'in' && g.display_clock
     ? ` · Q${esc(g.period || '')} ${esc(g.display_clock)}`
     : '';
+  const rec = (t) => t?.record ? ` <span class="team-record-inline">(${esc(t.record)})</span>` : '';
   return `
     <div class="card game">
       <h3>
         ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" class="team-logo-sm">` : ''}
-        ${esc(g.away_team?.name)}${specialTagHtml(g.away_team)} @
+        ${esc(g.away_team?.name)}${rec(g.away_team)}${specialTagHtml(g.away_team)} @
         ${g.home_team?.logo ? `<img src="${esc(g.home_team.logo)}" class="team-logo-sm">` : ''}
-        ${esc(g.home_team?.name)}${specialTagHtml(g.home_team)}
+        ${esc(g.home_team?.name)}${rec(g.home_team)}${specialTagHtml(g.home_team)}
       </h3>
       <p><strong>${date.toLocaleDateString()}</strong> ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
       <p>${esc(g.venue?.name || '')}</p>
@@ -573,6 +604,7 @@ function populateInjuriesTeamFilter() {
   sel.addEventListener('change', (e) => {
     injuriesTeamName = e.target.value;
     displayInjuries();
+    pushUrlState(injuriesTeamName ? { tab: 'injuries', team: injuriesTeamName } : { tab: 'injuries' });
   });
   sel.dataset.populated = '1';
 }
@@ -895,7 +927,8 @@ function enrichHintsFromRoster(playerId, hints) {
 }
 
 async function openPlayer(playerId, team, hints) {
-  switchTab('stats', { noLoad: true });
+  switchTab('stats', { noLoad: true, skipHistory: true });
+  pushUrlState({ tab: 'stats', player: playerId, teamId: team?.id || '', teamName: team?.name || '' });
   const grid = document.getElementById('statsGrid');
   grid.innerHTML = '<p>Loading player stats…</p>';
   hints = enrichHintsFromRoster(playerId, hints);
@@ -1204,9 +1237,210 @@ function hideLiveModal() {
   document.getElementById('liveModal').classList.add('hidden');
 }
 
+// Global search — single input that searches teams, players, coaches and jumps to the
+// right detail screen. Lives in the header so users don't have to guess which tab to open first.
+let globalSearchTimer;
+let globalSearchSeq = 0;
+
+function hideGlobalSearch() {
+  const results = document.getElementById('globalSearchResults');
+  const input = document.getElementById('globalSearchInput');
+  if (!results) return;
+  results.classList.add('hidden');
+  results.innerHTML = '';
+  input?.setAttribute('aria-expanded', 'false');
+}
+
+function clearGlobalSearch() {
+  const input = document.getElementById('globalSearchInput');
+  if (input) input.value = '';
+  hideGlobalSearch();
+}
+
+function renderGlobalSearchResults({ teams, players, coaches }) {
+  const results = document.getElementById('globalSearchResults');
+  const input = document.getElementById('globalSearchInput');
+  if (!results) return;
+  if (!teams.length && !players.length && !coaches.length) {
+    results.innerHTML = `<p class="gs-empty">No matches.</p>`;
+    results.classList.remove('hidden');
+    input?.setAttribute('aria-expanded', 'true');
+    return;
+  }
+  const sec = (label, rows) => rows.length
+    ? `<div class="gs-section"><h4>${esc(label)}</h4>${rows}</div>` : '';
+
+  const teamRows = teams.slice(0, 5).map(t => `
+    <button class="gs-row" data-kind="team" data-team-id="${esc(t.id)}" type="button">
+      ${t.logo ? `<img src="${esc(t.logo)}" alt="" class="gs-logo">` : `<span class="gs-logo gs-logo-init">${esc(initials(t.name))}</span>`}
+      <span class="gs-label">${esc(t.name)}${t.record ? ` <small>(${esc(t.record)})</small>` : ''}</span>
+    </button>
+  `).join('');
+
+  const playerRows = players.slice(0, 8).map(p => `
+    <button class="gs-row" data-kind="player"
+      data-player-id="${esc(p.id)}"
+      data-team-id="${esc(p.team_id || '')}"
+      data-team-name="${esc(p.team_name || '')}"
+      data-player-name="${esc(p.name || '')}"
+      data-jersey="${esc(p.jersey || '')}"
+      data-position="${esc(p.position || '')}"
+      data-height="${esc(p.height || '')}"
+      data-college="${esc(p.college || '')}"
+      type="button">
+      ${p.headshot
+        ? `<img src="${esc(p.headshot)}" alt="" class="gs-logo gs-logo-round">`
+        : `<span class="gs-logo gs-logo-round gs-logo-init">${esc(initials(p.name || ''))}</span>`}
+      <span class="gs-label">${esc(p.name)}<small>${esc(p.team_name || '')}${p.position ? ' · ' + esc(p.position) : ''}</small></span>
+    </button>
+  `).join('');
+
+  const coachRows = coaches.slice(0, 5).map(c => `
+    <button class="gs-row" data-kind="coach" data-team-id="${esc(c.team_id)}" type="button">
+      ${c.logo ? `<img src="${esc(c.logo)}" alt="" class="gs-logo">` : `<span class="gs-logo gs-logo-init">${esc(initials(c.team_name))}</span>`}
+      <span class="gs-label">${esc(c.name)}<small>${esc(c.team_name)} · Head coach</small></span>
+    </button>
+  `).join('');
+
+  results.innerHTML = sec('Teams', teamRows) + sec('Players', playerRows) + sec('Coaches', coachRows);
+  results.classList.remove('hidden');
+  input?.setAttribute('aria-expanded', 'true');
+
+  results.querySelectorAll('.gs-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const kind = row.dataset.kind;
+      if (kind === 'team') {
+        const id = row.dataset.teamId;
+        clearGlobalSearch();
+        switchTab('rosters');
+        const filter = document.getElementById('teamFilter');
+        if (filter) filter.value = id;
+        displayRosters(id);
+      } else if (kind === 'player') {
+        clearGlobalSearch();
+        openPlayer(row.dataset.playerId,
+          { id: row.dataset.teamId, name: row.dataset.teamName },
+          {
+            name: row.dataset.playerName,
+            jersey: row.dataset.jersey,
+            position: row.dataset.position,
+            height: row.dataset.height,
+            college: row.dataset.college,
+          });
+      } else if (kind === 'coach') {
+        const id = row.dataset.teamId;
+        clearGlobalSearch();
+        switchTab('rosters');
+        const filter = document.getElementById('teamFilter');
+        if (filter) filter.value = id;
+        displayRosters(id);
+      }
+    });
+  });
+}
+
+async function runGlobalSearch(q) {
+  const seq = ++globalSearchSeq;
+  const needle = q.toLowerCase();
+  try {
+    await ensureTeams();
+    // Cancel if the user kept typing.
+    if (seq !== globalSearchSeq) return;
+    const teamHits = teamsData.filter(t => t.name?.toLowerCase().includes(needle));
+    const coachHits = teamsData
+      .filter(t => t.head_coach && t.head_coach.toLowerCase().includes(needle))
+      .map(t => ({ name: t.head_coach, team_id: t.id, team_name: t.name, logo: t.logo }));
+
+    const res = await fetch(`${API_BASE}/players/search?q=${encodeURIComponent(q)}`);
+    if (seq !== globalSearchSeq) return;
+    const data = await res.json();
+    const players = data.players || [];
+    renderGlobalSearchResults({ teams: teamHits, players, coaches: coachHits });
+  } catch (err) {
+    console.error('Global search error:', err);
+  }
+}
+
+function initGlobalSearch() {
+  const input = document.getElementById('globalSearchInput');
+  const results = document.getElementById('globalSearchResults');
+  if (!input || !results) return;
+  input.addEventListener('input', (e) => {
+    const q = e.target.value.trim();
+    clearTimeout(globalSearchTimer);
+    if (q.length < 2) { hideGlobalSearch(); return; }
+    globalSearchTimer = setTimeout(() => runGlobalSearch(q), 200);
+  });
+  input.addEventListener('focus', () => {
+    if (input.value.trim().length >= 2 && results.innerHTML) {
+      results.classList.remove('hidden');
+      input.setAttribute('aria-expanded', 'true');
+    }
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { input.blur(); clearGlobalSearch(); }
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#globalSearch')) hideGlobalSearch();
+  });
+}
+
+// Restore app state from the current URL. Used on initial load and on popstate.
+async function applyUrlState() {
+  const sp = new URLSearchParams(location.search);
+  const tab = sp.get('tab');
+  const team = sp.get('team');
+  const player = sp.get('player');
+  const teamId = sp.get('teamId');
+  const teamName = sp.get('teamName');
+
+  suppressHistory = true;
+  try {
+    if (player) {
+      // Deep link to a player. openPlayer handles fetch + render.
+      switchTab('stats', { noLoad: true, skipHistory: true });
+      await openPlayer(player, { id: teamId, name: teamName }, { name: '' });
+      return;
+    }
+    if (tab && KNOWN_TABS.has(tab)) {
+      if (tab === 'schedule') { scheduleTeamName = team || ''; scheduleFavApplied = true; }
+      if (tab === 'injuries') { injuriesTeamName = team || ''; injuriesFavApplied = true; }
+      switchTab(tab, { skipHistory: true });
+      if (tab === 'rosters') {
+        await ensureTeams();
+        const filter = document.getElementById('teamFilter');
+        if (filter) filter.value = team || '';
+        displayRosters(team || '');
+      } else if (tab === 'schedule') {
+        const sel = document.getElementById('scheduleTeamFilter');
+        if (sel?.dataset.populated === '1') { sel.value = scheduleTeamName; displaySchedule(); }
+      } else if (tab === 'injuries') {
+        const sel = document.getElementById('injuriesTeamFilter');
+        if (sel?.dataset.populated === '1') { sel.value = injuriesTeamName; displayInjuries(); }
+      }
+      return;
+    }
+    // No tab in URL — land on rosters as before.
+    switchTab('rosters', { skipHistory: true });
+  } finally {
+    suppressHistory = false;
+  }
+}
+
+window.addEventListener('popstate', () => { applyUrlState(); });
+
+if ('serviceWorker' in navigator) {
+  // Defer registration until after first paint — we don't want the SW install fighting
+  // with the initial render for bandwidth on a fresh load.
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => console.warn('SW register failed:', err));
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   initThemePicker();
-  loadRosters();
+  initGlobalSearch();
+  applyUrlState();
   startLivePolling();
 
   document.getElementById('liveNowBtn')?.addEventListener('click', showLiveModal);

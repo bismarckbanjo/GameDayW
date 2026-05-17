@@ -124,6 +124,7 @@ function buildSearch(state) {
   if (state.player) sp.set('player', state.player);
   if (state.teamId) sp.set('teamId', state.teamId);
   if (state.teamName) sp.set('teamName', state.teamName);
+  if (state.game) sp.set('game', state.game);
   const s = sp.toString();
   return s ? `?${s}` : location.pathname;
 }
@@ -423,8 +424,14 @@ function gameCardHtml(g) {
     ? ` · Q${esc(g.period || '')} ${esc(g.display_clock)}`
     : '';
   const rec = (t) => t?.record ? ` <span class="team-record-inline">(${esc(t.record)})</span>` : '';
+  // Only WNBA-vs-WNBA matchups get the head-to-head deep link — for TBD or
+  // non-WNBA opponents the matchup page would be mostly empty.
+  const tappable = !!g.id && isWnbaTeam(g.away_team) && isWnbaTeam(g.home_team);
+  const linkAttrs = tappable
+    ? ` data-game-id="${esc(g.id)}" role="button" tabindex="0" aria-label="Open head-to-head for ${esc(g.away_team?.name || '')} at ${esc(g.home_team?.name || '')}"`
+    : '';
   return `
-    <div class="card game">
+    <div class="card game${tappable ? ' is-link' : ''}"${linkAttrs}>
       <h3>
         ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" class="team-logo-sm">` : ''}
         ${esc(g.away_team?.name)}${rec(g.away_team)}${specialTagHtml(g.away_team)} @
@@ -537,6 +544,143 @@ function displaySchedule() {
       displaySchedule();
     });
   });
+}
+
+// --- Head-to-Head matchup view ----------------------------------------------
+// Tapping a game card on the Schedule (or in the Live Now modal) opens this
+// view inside the #schedule section, deep-linkable as ?tab=schedule&game=ID.
+
+function matchupTeamColHtml(side, team, stats, injuries, fallback) {
+  const logo = team?.logo || fallback?.logo;
+  const name = team?.name || fallback?.name || 'TBA';
+  const record = team?.record;
+  const coach = team?.head_coach;
+  const head = logo
+    ? `<img src="${esc(logo)}" alt="" class="matchup-logo">`
+    : `<span class="matchup-logo matchup-logo--placeholder">${esc(initials(name))}</span>`;
+  const statsHtml = (stats || []).length
+    ? `<div class="matchup-stats">` + stats.map(s =>
+        `<div class="headline-stat"><span class="hs-label">${esc(s.label)}</span><strong class="hs-value">${esc(s.value)}</strong></div>`
+      ).join('') + `</div>`
+    : `<p class="muted matchup-empty">Season stats not available yet.</p>`;
+  const injuriesHtml = (injuries || []).length
+    ? `<ul class="matchup-inj-list">` + injuries.map(i => {
+        const detail = i.detail ? ` · ${i.side ? esc(i.side) + ' ' : ''}${esc(i.detail)}` : '';
+        return `<li>
+          <strong>${esc(i.player?.name || 'Unknown')}</strong>
+          <span class="inj-status">${esc(i.status || '')}</span>
+          <span class="inj-detail">${detail}</span>
+        </li>`;
+      }).join('') + `</ul>`
+    : `<p class="muted matchup-empty">No injuries reported.</p>`;
+  return `
+    <div class="matchup-col matchup-col--${side}">
+      ${head}
+      <h3 class="matchup-team-name">${esc(name)}</h3>
+      <p class="matchup-team-meta">
+        ${record ? `<span class="matchup-record">${esc(record)}</span>` : ''}
+        ${coach ? `<span class="matchup-coach">Coach ${esc(coach)}</span>` : ''}
+      </p>
+      <h4 class="matchup-subhead">Season stats</h4>
+      ${statsHtml}
+      <h4 class="matchup-subhead">Injuries</h4>
+      ${injuriesHtml}
+    </div>
+  `;
+}
+
+function matchupHeaderHtml(g) {
+  const date = new Date(g.scheduled);
+  const score = (g.state === 'in' || g.state === 'post')
+    ? `<p class="matchup-score"><strong>${esc(g.away_team?.abbreviation)} ${esc(g.away_team?.score)} – ${esc(g.home_team?.score)} ${esc(g.home_team?.abbreviation)}</strong></p>`
+    : '';
+  const liveDetail = g.state === 'in' && g.display_clock
+    ? ` · Q${esc(g.period || '')} ${esc(g.display_clock)}`
+    : '';
+  const venueLine = [g.venue?.name, g.venue?.city].filter(Boolean).map(esc).join(' · ');
+  return `
+    <div class="matchup-meta card">
+      <p class="matchup-when">
+        <strong>${date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</strong>
+        · ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+      </p>
+      ${venueLine ? `<p class="matchup-venue">${venueLine}</p>` : ''}
+      ${score}
+      <p class="matchup-status">${esc(g.status || '')}${liveDetail}</p>
+      ${watchPillsHtml(g.watch_on)}
+    </div>
+  `;
+}
+
+function renderMatchupShell(g) {
+  return `
+    <button class="back-btn" id="backToSchedule" type="button">Back to Schedule</button>
+    ${matchupHeaderHtml(g)}
+    <div class="matchup-teams">
+      <div class="matchup-col matchup-col--away matchup-col--loading">
+        <p class="muted">Loading ${esc(g.away_team?.name || 'team')}…</p>
+      </div>
+      <div class="matchup-col matchup-col--home matchup-col--loading">
+        <p class="muted">Loading ${esc(g.home_team?.name || 'team')}…</p>
+      </div>
+    </div>
+  `;
+}
+
+function wireMatchupBack() {
+  document.getElementById('backToSchedule')?.addEventListener('click', () => {
+    pushUrlState({ tab: 'schedule', team: scheduleTeamName || undefined });
+    displaySchedule();
+  });
+}
+
+async function ensureScheduleData() {
+  if (scheduleData.length) return;
+  const [res] = await Promise.all([fetch(`${API_BASE}/schedule`), ensureTeams()]);
+  const data = await res.json();
+  scheduleData = data.games || [];
+}
+
+async function openMatchup(gameId) {
+  if (!gameId) return;
+  // Close the Live Now modal if the tap came from inside it.
+  if (typeof hideLiveModal === 'function') hideLiveModal();
+  await ensureScheduleData();
+  const g = scheduleData.find(x => String(x.id) === String(gameId));
+  if (!g) return;
+
+  switchTab('schedule', { noLoad: true, skipHistory: true });
+  pushUrlState({ tab: 'schedule', game: gameId });
+  // Make sure the schedule filter dropdown is populated even if the user deep-linked here.
+  populateScheduleTeamFilter();
+
+  const grid = document.getElementById('scheduleGrid');
+  grid.innerHTML = renderMatchupShell(g);
+  wireMatchupBack();
+
+  const awayId = g.away_team?.id;
+  const homeId = g.home_team?.id;
+  const j = (r) => r.ok ? r.json() : null;
+  const [awayRes, homeRes, awayStatsRes, homeStatsRes, injRes] = await Promise.all([
+    fetch(`${API_BASE}/team/${encodeURIComponent(awayId)}`).then(j).catch(() => null),
+    fetch(`${API_BASE}/team/${encodeURIComponent(homeId)}`).then(j).catch(() => null),
+    fetch(`${API_BASE}/team/${encodeURIComponent(awayId)}/stats`).then(j).catch(() => null),
+    fetch(`${API_BASE}/team/${encodeURIComponent(homeId)}/stats`).then(j).catch(() => null),
+    fetch(`${API_BASE}/injuries`).then(j).catch(() => null),
+  ]);
+
+  // If the user clicked away to another view, don't clobber it.
+  if (!new URLSearchParams(location.search).get('game')) return;
+
+  const allInj = injRes?.injuries || [];
+  const awayInj = allInj.filter(i => String(i.team?.id) === String(awayId));
+  const homeInj = allInj.filter(i => String(i.team?.id) === String(homeId));
+
+  const teams = document.querySelector('.matchup-teams');
+  if (!teams) return;
+  teams.innerHTML =
+    matchupTeamColHtml('away', awayRes?.team, awayStatsRes?.stats, awayInj, g.away_team) +
+    matchupTeamColHtml('home', homeRes?.team, homeStatsRes?.stats, homeInj, g.home_team);
 }
 
 // Coaches
@@ -1393,9 +1537,15 @@ async function applyUrlState() {
   const player = sp.get('player');
   const teamId = sp.get('teamId');
   const teamName = sp.get('teamName');
+  const game = sp.get('game');
 
   suppressHistory = true;
   try {
+    if (game) {
+      // Deep link to a head-to-head matchup. openMatchup handles fetch + render.
+      await openMatchup(game);
+      return;
+    }
     if (player) {
       // Deep link to a player. openPlayer handles fetch + render.
       switchTab('stats', { noLoad: true, skipHistory: true });
@@ -1442,6 +1592,24 @@ document.addEventListener('DOMContentLoaded', () => {
   initGlobalSearch();
   applyUrlState();
   startLivePolling();
+
+  // Delegated click handler for game cards — covers schedule grid AND live modal.
+  // Skips clicks on watch links so those still navigate to the stream.
+  const openMatchupFromCard = (target) => {
+    const card = target.closest('.card.game[data-game-id]');
+    if (!card) return;
+    if (target.closest('a, button')) return;
+    openMatchup(card.dataset.gameId);
+  };
+  document.addEventListener('click', (e) => openMatchupFromCard(e.target));
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest?.('.card.game[data-game-id]');
+    if (!card) return;
+    e.preventDefault();
+    openMatchup(card.dataset.gameId);
+    hideLiveModal();
+  });
 
   document.getElementById('liveNowBtn')?.addEventListener('click', showLiveModal);
   document.getElementById('todayStrip')?.addEventListener('click', showLiveModal);

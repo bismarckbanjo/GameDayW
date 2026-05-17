@@ -293,6 +293,56 @@ app.get('/api/leaders', async (_req, res) => {
   }
 });
 
+// Team-level season stats surfaced on the Head-to-Head matchup screen.
+// ESPN names match the per-game / percentage stats fans expect.
+const TEAM_STAT_KEYS = [
+  { name: 'avgPoints',              label: 'PPG' },
+  { name: 'avgRebounds',            label: 'RPG' },
+  { name: 'avgAssists',             label: 'APG' },
+  { name: 'fieldGoalPct',           label: 'FG%' },
+  { name: 'threePointFieldGoalPct', label: '3P%' },
+  { name: 'freeThrowPct',           label: 'FT%' },
+  { name: 'avgSteals',              label: 'SPG' },
+  { name: 'avgBlocks',              label: 'BPG' },
+];
+
+async function fetchTeamStatsForSeason(teamId, season) {
+  const url = `${CORE}/seasons/${season}/types/2/teams/${teamId}/statistics`;
+  const raw = await getJson(url);
+  const cats = raw?.splits?.categories || [];
+  const byName = new Map();
+  for (const c of cats) for (const s of (c.stats || [])) byName.set(s.name, s);
+  const out = [];
+  for (const want of TEAM_STAT_KEYS) {
+    const s = byName.get(want.name);
+    if (!s) continue;
+    const value = s.displayValue ?? (s.value != null ? String(s.value) : '');
+    if (value === '') continue;
+    out.push({ name: want.name, label: want.label, value });
+  }
+  return out;
+}
+
+async function fetchTeamStats(teamId) {
+  return cached(`team_stats_${teamId}`, 30 * 60 * 1000, async () => {
+    let stats = await fetchTeamStatsForSeason(teamId, SEASON).catch(() => []);
+    // Early-season the current-year endpoint can be empty; fall back to last year.
+    if (!stats.length && SEASON > 2020) {
+      stats = await fetchTeamStatsForSeason(teamId, SEASON - 1).catch(() => []);
+    }
+    return stats;
+  });
+}
+
+app.get('/api/team/:teamId/stats', async (req, res) => {
+  try {
+    const stats = await fetchTeamStats(req.params.teamId);
+    res.json({ stats });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/player/:playerId', async (req, res) => {
   try {
     const id = req.params.playerId;

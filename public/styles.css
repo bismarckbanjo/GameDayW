@@ -1908,3 +1908,190 @@ footer {
   letter-spacing: -0.01em;
   color: color-mix(in srgb, var(--primary) 70%, var(--ink));
 }
+
+/* Head-to-Head matchup view (Schedule → tap a game card) */
+.card.game.is-link {
+  cursor: pointer;
+}
+.card.game.is-link:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  outline-offset: 2px;
+}
+
+.grid > .matchup-meta,
+.grid > .matchup-teams {
+  grid-column: 1 / -1;
+}
+
+.matchup-meta {
+  text-align: center;
+  padding: 1rem 1.15rem;
+  min-height: 0;
+}
+.matchup-meta p { margin: 0.2rem 0; }
+.matchup-when {
+  font-size: 1.05rem;
+  color: var(--ink);
+  font-weight: 800;
+}
+.matchup-venue {
+  color: var(--muted);
+  font-weight: 700;
+}
+.matchup-status {
+  color: var(--muted);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.8rem;
+}
+.matchup-score {
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.matchup-meta .watch-pills {
+  justify-content: center;
+  margin-top: 0.6rem;
+}
+
+.matchup-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+}
+.matchup-col {
+  position: relative;
+  padding: 1.1rem 0.9rem;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.78));
+  border: 1px solid rgba(255,255,255,0.8);
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.matchup-col--away { border-left: 6px solid var(--secondary); }
+.matchup-col--home { border-right: 6px solid var(--primary); }
+
+.matchup-logo {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  margin: 0 auto;
+  padding: 0.4rem;
+  border-radius: 22px;
+  background: rgba(255,255,255,0.85);
+  box-shadow: inset 0 0 0 1px rgba(16,17,22,0.06), 0 10px 22px rgba(16,17,22,0.08);
+}
+.matchup-logo--placeholder {
+  display: grid;
+  place-items: center;
+  font-weight: 950;
+  color: var(--on-primary);
+  background: linear-gradient(135deg, var(--secondary), var(--primary));
+}
+
+.matchup-team-name {
+  font-size: 1.15rem;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  margin: 0.2rem 0 0;
+  color: var(--ink);
+}
+.matchup-team-name::after { content: none; }
+
+.matchup-team-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 0.6rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.matchup-record {
+  font-weight: 950;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--primary) 10%, white);
+  border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.matchup-coach {
+  font-weight: 700;
+}
+
+.matchup-subhead {
+  margin: 0.55rem 0 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 950;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+
+.matchup-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+.matchup-stats .headline-stat {
+  padding: 0.5rem 0.3rem;
+}
+.matchup-stats .hs-value {
+  font-size: 1.1rem;
+}
+
+.matchup-inj-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+  text-align: left;
+  font-size: 0.85rem;
+}
+.matchup-inj-list li {
+  padding: 0.4rem 0.55rem;
+  background: color-mix(in srgb, var(--danger) 5%, white);
+  border: 1px solid color-mix(in srgb, var(--danger) 18%, transparent);
+  border-radius: 10px;
+  line-height: 1.3;
+}
+.matchup-inj-list strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 900;
+  font-size: 0.9rem;
+}
+.matchup-inj-list .inj-status {
+  display: inline-block;
+  margin-top: 0.18rem;
+  font-weight: 850;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--danger);
+}
+.matchup-inj-list .inj-detail {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.matchup-empty {
+  margin: 0.3rem 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 520px) {
+  .matchup-teams { gap: 0.5rem; }
+  .matchup-col { padding: 0.85rem 0.55rem; }
+  .matchup-logo { width: 72px; height: 72px; border-radius: 18px; }
+  .matchup-team-name { font-size: 1rem; }
+  .matchup-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.3rem; }
+  .matchup-stats .hs-value { font-size: 1rem; }
+}

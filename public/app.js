@@ -624,7 +624,8 @@ async function loadTrades() {
   grid.innerHTML = '<p>Loading recent trades…</p>';
   try {
     if (!tradesData) {
-      const res = await fetch(`${API_BASE}/trades`);
+      // Pull teams in parallel so we can resolve team brand colors for the arrows.
+      const [res] = await Promise.all([fetch(`${API_BASE}/trades`), ensureTeams()]);
       const data = await res.json();
       tradesData = data.trades || [];
     }
@@ -635,6 +636,13 @@ async function loadTrades() {
   }
 }
 
+// Map "Portland Fire" → "#E93CAC" using the cached teams data. Falls back to
+// the page's --primary if no match (e.g. before /api/teams resolves).
+function teamColor(name) {
+  const hit = teamsData.find(t => t.name === name);
+  return hit?.color ? `#${hit.color}` : null;
+}
+
 function displayTrades(trades) {
   const grid = document.getElementById('tradesGrid');
   if (!trades.length) {
@@ -642,30 +650,31 @@ function displayTrades(trades) {
     return;
   }
   grid.innerHTML = trades.map(t => {
-    const teamsHtml = t.teams.map(tm => {
-      const items = tm.items.map(it => {
-        if (it.kind === 'pick') {
-          return `<li class="trade-pick">${esc(it.label)}</li>`;
-        }
-        const meta = [it.age && `Age ${it.age}`, it.position && `Pos ${it.position}`, it.salary]
-          .filter(Boolean).map(esc).join(' · ');
-        return `<li class="trade-player"><strong>${esc(it.name)}</strong>${meta ? ` <small>${meta}</small>` : ''}</li>`;
-      }).join('');
-      return `
-        <div class="trade-team">
-          <div class="trade-team-head">
-            ${tm.logo ? `<img src="${esc(tm.logo)}" alt="" class="team-logo-sm" />` : ''}
-            <strong>${esc(tm.name)}</strong>
-          </div>
-          <div class="trade-team-label">${esc(tm.label || 'Incoming')}</div>
-          <ul class="trade-items">${items}</ul>
-        </div>
-      `;
-    }).join('');
+    // One row per asset moved. The row points toward the receiving team —
+    // its logo sits at the arrowhead, the player/pick at the tail.
+    // Direction alternates per receiving team so a two-team swap reads as
+    // two arrows pointing opposite ways, like the mockup.
+    const rows = [];
+    t.teams.forEach((dest, teamIdx) => {
+      const dirLeft = teamIdx % 2 === 0;
+      const color = teamColor(dest.name);
+      for (const item of dest.items) {
+        const label = item.kind === 'pick' ? item.label : item.name;
+        const tail = item.kind === 'pick'
+          ? '<span class="trade-tail trade-tail--pick" aria-hidden="true">PK</span>'
+          : `<span class="trade-tail" aria-hidden="true">${esc(initials(item.name))}</span>`;
+        const logo = dest.logo
+          ? `<img src="${esc(dest.logo)}" alt="${esc(dest.name)}" class="trade-logo" />`
+          : `<span class="trade-logo trade-logo--placeholder">${esc(initials(dest.name))}</span>`;
+        const styleAttr = color ? ` style="--arrow-color:${esc(color)}"` : '';
+        const arrow = `<div class="trade-arrow trade-arrow--${dirLeft ? 'left' : 'right'}"${styleAttr}><span class="trade-arrow-label">${esc(label)}</span></div>`;
+        rows.push(`<div class="trade-row">${dirLeft ? logo + arrow + tail : tail + arrow + logo}</div>`);
+      }
+    });
     return `
       <div class="card trade">
         <h3>${esc(t.date_display)}</h3>
-        <div class="trade-teams">${teamsHtml}</div>
+        <div class="trade-rows">${rows.join('')}</div>
       </div>
     `;
   }).join('');

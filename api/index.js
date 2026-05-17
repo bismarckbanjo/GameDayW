@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
+const cheerio = require('cheerio');
 
 const app = express();
 app.use(cors());
@@ -338,25 +339,88 @@ app.get('/api/injuries', async (_req, res) => {
   }
 });
 
-const TRANSACTION_KEYWORDS = /\b(sign(ed|ing|s)?|trade(d|s)?|waive(d|s)?|release(d|s)?|claim(ed|s)?|acquire(d|s)?|cut|contract|agree(d|ment|s)?|hardship|free agent|exhibit 10|lands|joins|added|promote(d|s)?|sale|relocat(e|ion)|expansion|extension|deal)\b/i;
-const GAME_TYPES = new Set(['Preview', 'Recap', 'Media']);
+// Spotrac scraper for WNBA trades. They block bare requests, so we send a real
+// browser UA. The HTML structure is server-rendered: each trade is a card with a
+// "card-header bg-dark bg-gradient text-white" date row followed by a
+// .tradebody div containing one .flex-fill block per team in the trade.
+const TRADES_URL = 'https://www.spotrac.com/wnba/transactions/trade';
+const TRADES_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const TRADES_WINDOW_DAYS = 30;
 
-app.get('/api/transactions', async (_req, res) => {
-  try {
-    const data = await cached('transactions', 15 * 60 * 1000, async () => {
-      const raw = await getJson(`${SITE}/news?limit=50`);
-      return (raw.articles || [])
-        .filter(a => !GAME_TYPES.has(a.type) && TRANSACTION_KEYWORDS.test(a.headline || ''))
-        .map(a => ({
-          headline: a.headline,
-          description: a.description,
-          published: a.published,
-          link: a.links?.web?.href,
-          image: a.images?.[0]?.url,
-          source: a.byline || 'ESPN',
-        }));
+function parseSpotracDate(s) {
+  // "May 06, 2026" → Date (UTC noon to avoid TZ rounding when we ISO-stringify).
+  const d = new Date(`${s} 12:00:00Z`);
+  return isNaN(d) ? null : d;
+}
+
+function parseTradesHtml(html) {
+  const $ = cheerio.load(html);
+  const trades = [];
+  $('.card-header.bg-dark.bg-gradient.text-white').each((_, el) => {
+    const dateText = $(el).text().trim();
+    const date = parseSpotracDate(dateText);
+    if (!date) return;
+    // The .tradebody is the next sibling card; teams are the .flex-fill blocks inside.
+    const body = $(el).nextAll('.tradebody').first();
+    if (!body.length) return;
+    const teams = [];
+    body.children('div').each((_, teamEl) => {
+      const $t = $(teamEl);
+      const name = $t.find('header h2').first().text().trim();
+      if (!name) return;
+      const logo = $t.find('header img').first().attr('src') || null;
+      const label = $t.find('.border-bottom').first().text().trim();
+      const items = [];
+      $t.find('.tradeinfo').each((_, infoEl) => {
+        const $i = $(infoEl);
+        const itemName = $i.find('a.fw-bold').first().text().trim();
+        const detail = $i.find('.text-muted').first().text().trim();
+        const salary = $i.find('.fs-xs').last().text().trim();
+        if (!itemName) return;
+        // Picks have a "YYYY Round N" name and no age/pos detail; players have detail.
+        if (/^\d{4}\s+Round/.test(itemName)) {
+          items.push({ kind: 'pick', label: itemName });
+        } else {
+          // detail looks like "Age: 27 | Pos: G"
+          const ageMatch = detail.match(/Age:\s*(\d+)/);
+          const posMatch = detail.match(/Pos:\s*([A-Z/-]+)/i);
+          items.push({
+            kind: 'player',
+            name: itemName,
+            age: ageMatch ? ageMatch[1] : null,
+            position: posMatch ? posMatch[1] : null,
+            salary: salary || null,
+          });
+        }
+      });
+      teams.push({ name, logo, label, items });
     });
-    res.json({ transactions: data });
+    if (teams.length >= 2) {
+      trades.push({
+        date: date.toISOString().slice(0, 10),
+        date_display: dateText,
+        teams,
+      });
+    }
+  });
+  return trades;
+}
+
+async function fetchTrades() {
+  return cached('trades', 60 * 60 * 1000, async () => {
+    const r = await fetch(TRADES_URL, { headers: { 'User-Agent': TRADES_UA, 'Accept': 'text/html' } });
+    if (!r.ok) throw new Error(`${r.status} ${TRADES_URL}`);
+    const html = await r.text();
+    const all = parseTradesHtml(html);
+    const cutoff = Date.now() - TRADES_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    return all.filter(t => new Date(t.date).getTime() >= cutoff);
+  });
+}
+
+app.get('/api/trades', async (_req, res) => {
+  try {
+    const trades = await fetchTrades();
+    res.json({ trades });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

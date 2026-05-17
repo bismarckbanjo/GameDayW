@@ -64,7 +64,7 @@ All endpoints proxy ESPN with server-side caching (TTL in parentheses):
 - `GET /api/players/search?q=` — name search across every roster (no cache)
 - `GET /api/injuries` — grouped injury report (10m)
 - `GET /api/leaders` — league leaders in PPG / RPG / APG / FG% (1h), powers the Player Stats landing
-- `GET /api/transactions` — headline filter of league news (15m) — endpoint kept but UI tab is hidden
+- `GET /api/trades` — last 30 days of WNBA trades, scraped from spotrac.com (1h)
 - `GET /api/standings` — raw ESPN standings (5m) — not yet wired into the UI
 
 ## Notes

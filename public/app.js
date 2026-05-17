@@ -129,6 +129,7 @@ async function loadTabData(tabName) {
       case 'stats': await loadStatsLanding(); break;
       case 'coaches': await loadCoaches(); break;
       case 'injuries': await loadInjuries(); break;
+      case 'trades': await loadTrades(); break;
     }
   } catch (err) {
     console.error(`Error loading ${tabName}:`, err);
@@ -614,6 +615,60 @@ function displayInjuries() {
     }
   }
   grid.innerHTML = html;
+}
+
+// Recent trades — scraped from spotrac, filtered server-side to the last ~30 days.
+let tradesData = null;
+async function loadTrades() {
+  const grid = document.getElementById('tradesGrid');
+  grid.innerHTML = '<p>Loading recent trades…</p>';
+  try {
+    if (!tradesData) {
+      const res = await fetch(`${API_BASE}/trades`);
+      const data = await res.json();
+      tradesData = data.trades || [];
+    }
+    displayTrades(tradesData);
+  } catch (err) {
+    grid.innerHTML = '<p>Error loading trades.</p>';
+    console.error('Trades Error:', err);
+  }
+}
+
+function displayTrades(trades) {
+  const grid = document.getElementById('tradesGrid');
+  if (!trades.length) {
+    grid.innerHTML = '<p>No trades in the past 30 days.</p>';
+    return;
+  }
+  grid.innerHTML = trades.map(t => {
+    const teamsHtml = t.teams.map(tm => {
+      const items = tm.items.map(it => {
+        if (it.kind === 'pick') {
+          return `<li class="trade-pick">${esc(it.label)}</li>`;
+        }
+        const meta = [it.age && `Age ${it.age}`, it.position && `Pos ${it.position}`, it.salary]
+          .filter(Boolean).map(esc).join(' · ');
+        return `<li class="trade-player"><strong>${esc(it.name)}</strong>${meta ? ` <small>${meta}</small>` : ''}</li>`;
+      }).join('');
+      return `
+        <div class="trade-team">
+          <div class="trade-team-head">
+            ${tm.logo ? `<img src="${esc(tm.logo)}" alt="" class="team-logo-sm" />` : ''}
+            <strong>${esc(tm.name)}</strong>
+          </div>
+          <div class="trade-team-label">${esc(tm.label || 'Incoming')}</div>
+          <ul class="trade-items">${items}</ul>
+        </div>
+      `;
+    }).join('');
+    return `
+      <div class="card trade">
+        <h3>${esc(t.date_display)}</h3>
+        <div class="trade-teams">${teamsHtml}</div>
+      </div>
+    `;
+  }).join('');
 }
 
 // Player stats search

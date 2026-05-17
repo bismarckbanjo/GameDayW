@@ -391,13 +391,8 @@ function gameCardHtml(g) {
   const liveDetail = g.state === 'in' && g.display_clock
     ? ` · Q${esc(g.period || '')} ${esc(g.display_clock)}`
     : '';
-  // Whole card links to ESPN's per-game page. Watch-pill anchors inside stop propagation
-  // (see wireGameCardLinks) so users can still tap a broadcaster directly.
-  const espnUrl = g.id ? `https://www.espn.com/wnba/game/_/gameId/${esc(g.id)}` : '';
-  const linkAttr = espnUrl ? `data-game-url="${espnUrl}" role="link" tabindex="0"` : '';
-  const linkClass = espnUrl ? ' is-link' : '';
   return `
-    <div class="card game${linkClass}" ${linkAttr}>
+    <div class="card game">
       <h3>
         ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" class="team-logo-sm">` : ''}
         ${esc(g.away_team?.name)}${specialTagHtml(g.away_team)} @
@@ -411,23 +406,6 @@ function gameCardHtml(g) {
       ${watchPillsHtml(g.watch_on)}
     </div>
   `;
-}
-
-function wireGameCardLinks(root) {
-  root.querySelectorAll('.card.game.is-link').forEach(card => {
-    const open = () => {
-      const url = card.dataset.gameUrl;
-      if (url) window.open(url, '_blank', 'noopener');
-    };
-    card.addEventListener('click', (e) => {
-      // Let the inner watch-pill anchors handle their own clicks.
-      if (e.target.closest('a')) return;
-      open();
-    });
-    card.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
-    });
-  });
 }
 
 function displaySchedule() {
@@ -527,7 +505,6 @@ function displaySchedule() {
       displaySchedule();
     });
   });
-  wireGameCardLinks(grid);
 }
 
 // Coaches
@@ -1154,7 +1131,6 @@ function showLiveModal() {
   }
 
   body.innerHTML = html;
-  wireGameCardLinks(body);
   modal.classList.remove('hidden');
   // Always land at the top when (re)opening, so the close button is in reach.
   modal.querySelector('.modal-content')?.scrollTo({ top: 0 });

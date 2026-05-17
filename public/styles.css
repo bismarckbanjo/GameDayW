@@ -1636,18 +1636,6 @@ footer {
   color: var(--muted);
 }
 
-/* Tappable game card — whole card opens ESPN's per-game page */
-.card.game.is-link { cursor: pointer; }
-.card.game.is-link:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-md);
-  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
-}
-.card.game.is-link:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--primary) 60%, transparent);
-  outline-offset: 3px;
-}
-
 /* Player detail — meta chips (Pos / # / Ht / From) */
 .meta-chips {
   display: flex;

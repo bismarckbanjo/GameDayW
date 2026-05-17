@@ -5,10 +5,10 @@ A sleek, easy-to-use WNBA lookup app. Built for fans who are tired of sifting th
 ## Features
 
 - **Tonight's Games** — sticky strip with live scores and what's on tonight
-- **Live Now** — modal with everything happening today (in progress, upcoming, finished). Game cards open the ESPN boxscore.
+- **Live Now** — modal with everything happening today (in progress, upcoming, finished)
 - **Favorites** — star your teams; they surface first on Rosters and default-filter Schedule + Injuries
 - **Rosters** — browse every WNBA team and player
-- **Schedule** — full season, bucketed by Today / Tomorrow / month; cards link to ESPN
+- **Schedule** — full season, bucketed by Today / Tomorrow / month
 - **Player Stats** — lands on league leaders (PPG / RPG / APG / FG%); search any player to see season averages, totals, height, and college
 - **Coaches** — head coach by team
 - **Injuries** — grouped by team, sorted by date

@@ -6,9 +6,9 @@ Things noted during the May 2026 code review that we agreed to defer.
 
 The Schedule tab currently lists every game in the season. A team filter (matching the one on Rosters) would let a fan see only their team's schedule in one tap. The pattern is already in `displayRosters` — reuse the `teamFilter` styling and bind a `<select>` above `#scheduleGrid` that filters `scheduleData` by `g.home_team.id === id || g.away_team.id === id`. Once team favorites are well-loved, default the filter to the user's first favorite.
 
-## #6 — Make game cards link somewhere
+## #6 — Game card → in-app Head-to-Head screen
 
-Today every card in the Schedule and Live Now modal is a dead end. ESPN's per-game page lives at `https://www.espn.com/wnba/game/_/gameId/{id}` — we already store `g.id`. Wrap the card in an `<a target="_blank">` for now. Later, build an in-app boxscore using ESPN's `summary` endpoint and render it in the same modal pattern as Live Now.
+Right now Schedule and Live Now game cards are intentionally non-tappable (we tried an ESPN deeplink and pulled it back — sending fans off-site defeats the point of the app). The replacement: tapping a card opens an in-app **Head-to-Head** page that shows both teams side by side with their season stats compared (record, PPG, OPP PPG, RPG, APG, FG%, 3P%, pace, streak). Data source: ESPN's `summary` endpoint per gameId plus `/api/teams` records and team season stats. Render as a two-column card with the better number on each row highlighted in the team's color.
 
 ## #11 — Trades & Waivers tab is noisy
 

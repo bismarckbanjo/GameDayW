@@ -822,6 +822,8 @@ function showLiveModal() {
 
   body.innerHTML = html;
   modal.classList.remove('hidden');
+  // Always land at the top when (re)opening, so the close button is in reach.
+  modal.querySelector('.modal-content')?.scrollTo({ top: 0 });
 }
 
 function hideLiveModal() {

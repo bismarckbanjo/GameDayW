@@ -447,6 +447,57 @@ async function searchPlayers(q) {
   }
 }
 
+const STAT_LABELS = {
+  gamesPlayed: 'Games Played',
+  gamesStarted: 'Games Started',
+  minutes: 'Total Minutes',
+  avgMinutes: 'Minutes per Game',
+  points: 'Total Points',
+  avgPoints: 'Points per Game',
+  rebounds: 'Total Rebounds',
+  avgRebounds: 'Rebounds per Game',
+  offensiveRebounds: 'Total Offensive Rebounds',
+  avgOffensiveRebounds: 'Offensive Rebounds per Game',
+  defensiveRebounds: 'Total Defensive Rebounds',
+  avgDefensiveRebounds: 'Defensive Rebounds per Game',
+  assists: 'Total Assists',
+  avgAssists: 'Assists per Game',
+  steals: 'Total Steals',
+  avgSteals: 'Steals per Game',
+  blocks: 'Total Blocks',
+  avgBlocks: 'Blocks per Game',
+  turnovers: 'Total Turnovers',
+  avgTurnovers: 'Turnovers per Game',
+  fouls: 'Total Personal Fouls',
+  avgFouls: 'Personal Fouls per Game',
+  'fieldGoalsMade-fieldGoalsAttempted': 'Field Goals (Made–Attempted)',
+  'avgFieldGoalsMade-avgFieldGoalsAttempted': 'Field Goals per Game (Made–Attempted)',
+  fieldGoalsMade: 'Field Goals Made',
+  fieldGoalsAttempted: 'Field Goals Attempted',
+  fieldGoalPct: 'Field Goal %',
+  'threePointFieldGoalsMade-threePointFieldGoalsAttempted': '3-Pointers (Made–Attempted)',
+  'avgThreePointFieldGoalsMade-avgThreePointFieldGoalsAttempted': '3-Pointers per Game (Made–Attempted)',
+  threePointFieldGoalsMade: '3-Pointers Made',
+  threePointFieldGoalsAttempted: '3-Pointers Attempted',
+  threePointFieldGoalPct: '3-Point %',
+  'freeThrowsMade-freeThrowsAttempted': 'Free Throws (Made–Attempted)',
+  'avgFreeThrowsMade-avgFreeThrowsAttempted': 'Free Throws per Game (Made–Attempted)',
+  freeThrowsMade: 'Free Throws Made',
+  freeThrowsAttempted: 'Free Throws Attempted',
+  freeThrowPct: 'Free Throw %',
+  doubleDouble: 'Double-Doubles',
+  tripleDouble: 'Triple-Doubles',
+};
+
+function humanizeStat(key) {
+  if (STAT_LABELS[key]) return STAT_LABELS[key];
+  const spaced = key
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/-/g, ' / ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+  return spaced;
+}
+
 async function openPlayer(playerId, team) {
   switchTab('stats');
   const grid = document.getElementById('statsGrid');
@@ -462,7 +513,7 @@ async function openPlayer(playerId, team) {
       if (!cat?.totals?.length) return '';
       const labels = cat.names || [];
       const vals = cat.totals || [];
-      const rows = labels.map((n, i) => `<tr><td>${n}</td><td>${vals[i] ?? ''}</td></tr>`).join('');
+      const rows = labels.map((n, i) => `<tr><td title="${n}">${humanizeStat(n)}</td><td>${vals[i] ?? ''}</td></tr>`).join('');
       return `<h4>${cat.displayName}</h4><table class="stats">${rows}</table>`;
     };
     const teamName = team?.name || ath?.team?.displayName || '';

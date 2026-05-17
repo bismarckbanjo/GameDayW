@@ -1016,7 +1016,7 @@ img.trade-logo { width: 100%; height: 100%; object-fit: contain; }
 }
 .trade-arrow {
   flex: 1 1 auto;
-  height: 48px;
+  height: 56px;
   background: var(--arrow-color, var(--primary));
   display: flex;
   align-items: center;
@@ -1026,20 +1026,22 @@ img.trade-logo { width: 100%; height: 100%; object-fit: contain; }
   font-size: 0.92rem;
   min-width: 0;
   text-shadow: 0 1px 2px rgba(0,0,0,0.22);
-  /* Pull each end under the adjacent logo/tail box so the arrow appears to
-     touch them without a visible seam. The clip-path then carves the chevron
-     point out of the overlapping edge. */
-  margin: 0 -10px;
+  /* Small gap so the arrow sits next to the logo/tail boxes rather than
+     under them. */
+  margin: 0 4px;
 }
+/* Classic arrow shape: a narrow shaft in the vertical middle (28%→72% of
+   height) that flares to the full height for the arrowhead (last 22% of
+   width). Reads as ←|=== or ===|→. */
 .trade-arrow--left {
-  clip-path: polygon(12% 0, 100% 0, 100% 100%, 12% 100%, 0 50%);
-  padding-left: 20px;
-  padding-right: 14px;
+  clip-path: polygon(22% 28%, 100% 28%, 100% 72%, 22% 72%, 22% 100%, 0 50%, 22% 0);
+  padding-left: 22%;
+  padding-right: 12px;
 }
 .trade-arrow--right {
-  clip-path: polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%);
-  padding-right: 20px;
-  padding-left: 14px;
+  clip-path: polygon(0 28%, 78% 28%, 78% 0, 100% 50%, 78% 100%, 78% 72%, 0 72%);
+  padding-right: 22%;
+  padding-left: 12px;
 }
 .trade-arrow-label {
   white-space: nowrap;

@@ -1,11 +1,55 @@
 const express = require('express');
-const cors = require('cors');
-const fetch = require('node-fetch');
 const cheerio = require('cheerio');
+// Node 22 ships global fetch — node-fetch is no longer needed.
+// CORS middleware removed intentionally: the frontend is same-origin (served from this
+// same deployment), so no cross-origin access is required. Leaving CORS open made the
+// API a free public proxy for ESPN/Spotrac data.
 
 const app = express();
-app.use(cors());
 app.use(express.static('public'));
+
+// --- Rate limiting -------------------------------------------------------------
+// Simple per-IP fixed-window limiter. In-memory, so on Vercel it's per-lambda-instance —
+// not airtight, but it stops single-source hammering, and the edge cache (s-maxage
+// headers below) absorbs legitimate traffic before it ever reaches the function.
+const RATE_LIMIT = 60;                  // max requests per window per IP
+const RATE_WINDOW_MS = 60 * 1000;       // 1 minute
+const rateBuckets = new Map();
+app.use('/api/', (req, res, next) => {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown')
+    .split(',')[0].trim();
+  const now = Date.now();
+  let bucket = rateBuckets.get(ip);
+  if (!bucket || now > bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + RATE_WINDOW_MS };
+    rateBuckets.set(ip, bucket);
+  }
+  if (++bucket.count > RATE_LIMIT) {
+    res.set('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+    return res.status(429).json({ error: 'Too many requests — slow down.' });
+  }
+  // Opportunistic cleanup so the map can't grow unbounded.
+  if (rateBuckets.size > 5000) {
+    for (const [k, v] of rateBuckets) if (now > v.resetAt) rateBuckets.delete(k);
+  }
+  next();
+});
+
+// --- Edge caching ---------------------------------------------------------------
+// s-maxage tells Vercel's CDN to cache the response at the edge; max-age=0 keeps the
+// browser revalidating (the service worker manages client-side caching itself).
+// stale-while-revalidate serves the stale copy while the edge refreshes in background.
+// Errors are sent with no-store (see sendError) so failures are never cached.
+function edgeCache(res, sMaxAge, swr) {
+  res.set('Cache-Control', `public, max-age=0, s-maxage=${sMaxAge}, stale-while-revalidate=${swr}`);
+}
+function sendError(res, e) {
+  res.set('Cache-Control', 'no-store');
+  res.status(500).json({ error: e.message });
+}
+
+// Validate ESPN numeric ids before they're interpolated into upstream URLs.
+const isValidId = (v) => /^\d{1,12}$/.test(String(v || ''));
 
 const SITE = 'https://site.api.espn.com/apis/site/v2/sports/basketball/wnba';
 const SITE_WEB = 'https://site.web.api.espn.com/apis/v2/sports/basketball/wnba';
@@ -24,8 +68,12 @@ async function cached(key, ttlMs, fn) {
   return value;
 }
 
+// All upstream fetches get a hard timeout so a hung ESPN/Spotrac response can't
+// hold the serverless function open to its max duration.
+const UPSTREAM_TIMEOUT_MS = 8000;
+
 async function getJson(url) {
-  const r = await fetch(url);
+  const r = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
   if (!r.ok) throw new Error(`${r.status} ${url}`);
   return r.json();
 }
@@ -241,55 +289,63 @@ async function fetchLeaders() {
 app.get('/api/teams', async (_req, res) => {
   try {
     const [teams, records] = await Promise.all([fetchTeamsWithRosters(), fetchTeamRecords()]);
+    edgeCache(res, 3600, 21600);
     res.json({ teams: teams.map(t => ({ ...t, record: records.get(String(t.id)) || null })) });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
 app.get('/api/team/:teamId', async (req, res) => {
   try {
+    if (!isValidId(req.params.teamId)) return res.status(400).json({ error: 'invalid team id' });
     const [teams, records] = await Promise.all([fetchTeamsWithRosters(), fetchTeamRecords()]);
     const team = teams.find(t => t.id === req.params.teamId);
     if (!team) return res.status(404).json({ error: 'team not found' });
+    edgeCache(res, 3600, 21600);
     res.json({ team: { ...team, record: records.get(String(team.id)) || null } });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
 app.get('/api/schedule', async (_req, res) => {
   try {
     const games = await fetchSchedule();
+    edgeCache(res, 60, 300);
     res.json({ games });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
 app.get('/api/live', async (_req, res) => {
   try {
     const games = await fetchLive();
+    edgeCache(res, 15, 30);
     res.json({ games });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
 app.get('/api/standings', async (_req, res) => {
   try {
-    res.json(await fetchStandings());
+    const data = await fetchStandings();
+    edgeCache(res, 300, 900);
+    res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
 app.get('/api/leaders', async (_req, res) => {
   try {
     const categories = await fetchLeaders();
+    edgeCache(res, 3600, 7200);
     res.json({ categories });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
@@ -336,29 +392,33 @@ async function fetchTeamStats(teamId) {
 
 app.get('/api/team/:teamId/stats', async (req, res) => {
   try {
+    if (!isValidId(req.params.teamId)) return res.status(400).json({ error: 'invalid team id' });
     const stats = await fetchTeamStats(req.params.teamId);
+    edgeCache(res, 1800, 3600);
     res.json({ stats });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
 app.get('/api/player/:playerId', async (req, res) => {
   try {
     const id = req.params.playerId;
+    if (!isValidId(id)) return res.status(400).json({ error: 'invalid player id' });
     const [profile, stats] = await Promise.all([
       getJson(`${CORE}/athletes/${id}`).catch(() => null),
       getJson(`https://site.web.api.espn.com/apis/common/v3/sports/basketball/wnba/athletes/${id}/stats`).catch(() => null),
     ]);
+    edgeCache(res, 300, 600);
     res.json({ profile, stats });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
 app.get('/api/players/search', async (req, res) => {
   try {
-    const q = String(req.query.q || '').trim().toLowerCase();
+    const q = String(req.query.q || '').trim().toLowerCase().slice(0, 60);
     if (q.length < 2) return res.json({ players: [] });
     const teams = await fetchTeamsWithRosters();
     const matches = [];
@@ -369,9 +429,10 @@ app.get('/api/players/search', async (req, res) => {
         }
       }
     }
+    edgeCache(res, 300, 600);
     res.json({ players: matches.slice(0, 25) });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
@@ -404,9 +465,10 @@ app.get('/api/injuries', async (_req, res) => {
       list.sort((a, b) => new Date(b.date) - new Date(a.date));
       return list;
     });
+    edgeCache(res, 600, 1800);
     res.json({ injuries: data });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
 });
 
@@ -479,7 +541,10 @@ function parseTradesHtml(html) {
 
 async function fetchTrades() {
   return cached('trades', 60 * 60 * 1000, async () => {
-    const r = await fetch(TRADES_URL, { headers: { 'User-Agent': TRADES_UA, 'Accept': 'text/html' } });
+    const r = await fetch(TRADES_URL, {
+      headers: { 'User-Agent': TRADES_UA, 'Accept': 'text/html' },
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    });
     if (!r.ok) throw new Error(`${r.status} ${TRADES_URL}`);
     const html = await r.text();
     const all = parseTradesHtml(html);
@@ -491,10 +556,17 @@ async function fetchTrades() {
 app.get('/api/trades', async (_req, res) => {
   try {
     const trades = await fetchTrades();
+    edgeCache(res, 3600, 7200);
     res.json({ trades });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    sendError(res, e);
   }
+});
+
+// Unknown /api routes get a JSON 404 instead of Express's default HTML page.
+app.use('/api', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.status(404).json({ error: 'not found' });
 });
 
 const PORT = process.env.PORT || 3000;

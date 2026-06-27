@@ -7,7 +7,7 @@
 //    if the network actually fails.
 // Bump VERSION when shipping breaking changes to invalidate old caches.
 
-const VERSION = 'v5';
+const VERSION = 'v6';
 const SHELL_CACHE = `shell-${VERSION}`;
 const API_CACHE = `api-${VERSION}`;
 // Cap the API cache so a long session visiting many player pages can't grow it unbounded.

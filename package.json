@@ -5,7 +5,8 @@
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js",
-    "dev": "node api/index.js"
+    "dev": "node api/index.js",
+    "test": "node --test"
   },
   "dependencies": {
     "cheerio": "^1.2.0",

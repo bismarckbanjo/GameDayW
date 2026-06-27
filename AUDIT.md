@@ -5,6 +5,81 @@
 
 ---
 
+## Re-audit — June 26, 2026
+*Scope this pass: code hygiene & bugs, UI/UX, performance. Security re-checked where it overlaps. All `.js` pass `node --check`.*
+
+The **"Harden API" commit (`f317bcb`) closed the four launch-blockers and two robustness items** from the original audit. Verified resolved in current code:
+
+- ✅ **#1 Edge caching** — `edgeCache()` sets `s-maxage`/`stale-while-revalidate` on every endpoint; errors sent `no-store`.
+- ✅ **#2 CORS + rate limiting** — open `cors()` removed (same-origin frontend); per-IP fixed-window limiter (60/min) on `/api/`.
+- ✅ **#3 Param validation** — `isValidId()` guards `/team/:id`, `/team/:id/stats`, `/player/:id` before interpolation.
+- ✅ **#7 Upstream timeouts** — `AbortSignal.timeout(8000)` on `getJson` and the Spotrac fetch.
+- ✅ **#12 Drop `node-fetch`** — gone from `package.json` (uses native `fetch`). *Note: a stale `node-fetch` entry still lingers in `package-lock.json` — run `npm install` to prune it.*
+- ✅ **#16 JSON 404** — `app.use('/api', …)` returns a JSON 404 instead of Express's HTML.
+
+### Still open from the original audit
+
+| # | Item | Status |
+|---|------|--------|
+| 5 | `cached()` has no in-flight dedupe (thundering herd) | **Open** — see C1 below |
+| 6 | `SEASON` computed once at cold start | **Open** — `const SEASON` at module load (line 60); a warm lambda crossing the Apr→May or Dec 31 boundary serves the wrong season. Make it `getSeason()` per request. |
+| 8 | `trades`/`leaders` cached for client page lifetime | **Open** — `if (!tradesData)` / `if (!leadersData)` never refetch; an all-day PWA session goes stale. |
+| 9 | SW `staleWhileRevalidate` renders stale `/api` data with no refresh | **Open** — fine for rosters, misleading for schedule scores. |
+| 10 | SW `api-v4` cache grows unbounded | **Open** — every player page cached forever; add a max-entries trim. |
+| 11 | Live poll never backs off | **Open** — fixed 30s `setInterval` runs through the offseason/overnight; back off when no games. |
+| 13 | Search results / tabs not keyboard-navigable | **Open** — `role="listbox"` holds `<button>`s with no arrow-key / `aria-activedescendant`; tabs aren't an ARIA tablist. |
+| 14 | No Open Graph / Twitter meta | **Open** — shared deep links render bare. |
+| 15 | Manifest has one 512px icon | **Open** — still no 192×192 and no `purpose:"maskable"`. |
+| 17 | No error tracking / analytics | Open (business). |
+| 18 | No tests / CI | Open. |
+
+### New findings this pass
+
+**Code hygiene & bugs**
+
+- **C1 (perf/correctness) — `cached()` still has no in-flight dedupe, and the blast radius is wider than item #5 implies.** `fetchTeamsWithRosters()` (the ~40-fetch builder) backs `/api/teams`, `/api/leaders`, `/api/players/search`, **and** `/api/team/:id`. On a cold cache, concurrent hits to any mix of these each trigger a full rebuild. Memoize the pending promise: store `{ promise, expiresAt }` and hand the same promise to concurrent callers. Single highest-value backend change remaining.
+- **C2 (hygiene/perf) — `/api/standings` is a dead, un-normalized endpoint.** Nothing in the frontend fetches it (records come from `/api/teams`), yet it returns ESPN's *entire raw* standings object — the only endpoint that isn't trimmed/normalized, and an unbounded payload. Either wire the long-planned Standings tab to it (and normalize the shape like the others) or drop the route.
+- **C3 (hygiene) — duplicated "today / next-slate" logic.** `renderTodayStrip()` (~line 1117) and `showLiveModal()` (~line 1221) repeat the same local-date filtering and "Today / Tomorrow / Next up" labeling (~40 near-identical lines). Extract one helper that returns `{ live, upcomingToday, finishedToday, future }` and have both consume it — keeps the two views from drifting.
+
+**UI / UX & accessibility**
+
+- **U1 (a11y) — Live modal has no focus management.** It correctly sets `role="dialog"`/`aria-modal`, but opening it doesn't move focus into the dialog, focus isn't trapped, and it isn't restored to the trigger on close. Background page also keeps scrolling behind it. Move focus to the close button on open, restore on close, and lock body scroll while open.
+- **U2 (a11y) — game-card team logos lack `alt`.** `team-logo-sm` `<img>`s in `gameCardHtml` (lines 430/432) have no `alt` attribute, while logos elsewhere use `alt=""`. Add `alt=""` (decorative — team name is already adjacent text).
+- **U3 (UX) — PWA theme color ignores the selected skin.** `<meta name="theme-color">` and the manifest are hardcoded `#000000`, so the installed app's status/title bar never matches the chosen team skin. Update the `theme-color` meta inside `applyTheme()`.
+
+**Performance (recap of the high-leverage items)**
+
+The ordered wins are **C1** (kill the thundering herd), then **#10** (trim the SW API cache so long sessions don't balloon), then **#11** (back off live polling in the offseason). **C2** removes a needless heavy payload. None are large changes.
+
+### Fixes applied — June 26, 2026
+
+All code-level items from this pass were implemented and verified (`node --test` → 7/7 pass; `node --check` clean on all JS; server boots and serves static + 400/404 paths correctly):
+
+- ✅ **C1 — in-flight dedupe** in `cached()` (`inflight` Map): concurrent callers on a cold/expired key now share one rebuild.
+- ✅ **#6 — `getSeason()`** computed per request; all five call sites (`fetchHeadCoach`, `fetchSchedule`, `fetchStandings`, `fetchLeaders`, `fetchTeamStats`) updated. *(Caught and fixed a latent `SEASON` reference in `fetchSchedule` during this work.)*
+- ✅ **C2 — `/api/standings` normalized** via `normalizeStandings()` (returns `{ groups: […] }`) instead of proxying ESPN's raw blob.
+- ✅ **C3 — shared `slateBuckets()` helper**; `renderTodayStrip()` and `showLiveModal()` now consume it (no more duplicated date logic).
+- ✅ **#8 — client TTL (5 min)** on trades + leaders so all-day sessions refresh.
+- ✅ **#9 — `/api/schedule` is now network-first** in the SW (was SWR); live + schedule never render stale.
+- ✅ **#10 — SW API cache trimmed** to 80 entries (`trimCache`).
+- ✅ **#11 — adaptive live polling** (30s live / 60s game-day / 10 min idle) via `setTimeout` recursion.
+- ✅ **#13 — keyboard nav**: ARIA tabs (`role="tablist"`/`tab`/`tabpanel`, roving tabindex, arrow/Home/End keys) and arrow-key + Enter navigation for global search (`role="option"`, `aria-activedescendant`).
+- ✅ **#14 — Open Graph / Twitter meta** added.
+- ✅ **#15 — manifest icons**: added 192×192 and a `purpose:"maskable"` 512 icon (precached by SW; bumped to `v5`).
+- ✅ **#18 — tests + CI**: `node:test` smoke suite (`test/api.test.js`) covering season logic, id validation, the Spotrac parser, event + standings normalizers; GitHub Actions workflow runs `npm test` on push/PR.
+- ✅ **U1 — Live modal a11y**: focus moves in on open, is trapped (Tab/Shift+Tab), restored on close; background scroll locked (`body.modal-open`).
+- ✅ **U2 — `alt=""`** added to game-card team logos.
+- ✅ **U3 — `theme-color` meta** updates with the selected team skin in `applyTheme()`.
+- ✅ **Lockfile** — stale `node-fetch` entry pruned from `package-lock.json`.
+
+**Not done (needs your input):** #17 (error tracking / analytics) requires a Sentry + Plausible/Umami account and keys — out of scope for a code pass; the data-licensing item (#4) and the larger feature adds remain business decisions.
+
+### Bottom line
+
+The launch-hardening from `f317bcb` plus this pass leaves the codebase in good shape: thundering herd closed, season logic correct year-round, SW caching bounded and freshness-aware, and a meaningful accessibility lift (tabs, search, modal). A test suite + CI now guard the most likely breakages. Remaining work is product/business, not code.
+
+---
+
 ## Part 1 — Code Audit
 
 ### 🔴 Critical (fix before launch)

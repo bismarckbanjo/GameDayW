@@ -56,16 +56,33 @@ const SITE_WEB = 'https://site.web.api.espn.com/apis/v2/sports/basketball/wnba';
 const CORE = 'https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba';
 // WNBA season runs May–Oct. Before May, the "current" season is the previous calendar year
 // (Jan–Apr is offseason after that season's playoffs have wrapped).
-const _now = new Date();
-const SEASON = _now.getMonth() < 4 ? _now.getFullYear() - 1 : _now.getFullYear();
+// Computed per call so a long-lived warm lambda crossing the Apr→May or Dec 31 boundary
+// always serves the correct season.
+function getSeason(now = new Date()) {
+  return now.getMonth() < 4 ? now.getFullYear() - 1 : now.getFullYear();
+}
 
 const cache = new Map();
+const inflight = new Map();
+// Cache-with-TTL plus in-flight dedupe: concurrent callers on a cold/expired key share a
+// single upstream rebuild instead of each triggering their own (prevents a thundering herd
+// on the heavy teams_full builder, which backs /teams, /leaders, /players/search and /team/:id).
 async function cached(key, ttlMs, fn) {
   const hit = cache.get(key);
   if (hit && hit.expiresAt > Date.now()) return hit.value;
-  const value = await fn();
-  cache.set(key, { value, expiresAt: Date.now() + ttlMs });
-  return value;
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const promise = (async () => {
+    try {
+      const value = await fn();
+      cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+      return value;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+  inflight.set(key, promise);
+  return promise;
 }
 
 // All upstream fetches get a hard timeout so a hung ESPN/Spotrac response can't
@@ -108,6 +125,7 @@ async function fetchRoster(teamId) {
 
 async function fetchHeadCoach(teamId) {
   try {
+    const SEASON = getSeason();
     const list = await getJson(`${CORE}/seasons/${SEASON}/teams/${teamId}/coaches`);
     const ref = list.items?.[0]?.$ref;
     if (!ref) return null;
@@ -181,6 +199,7 @@ async function fetchLive() {
 
 async function fetchSchedule() {
   return cached('schedule', 60 * 1000, async () => {
+    const SEASON = getSeason();
     // WNBA season runs roughly May–Oct. Fetch each month and merge.
     const months = ['05', '06', '07', '08', '09', '10'];
     const results = await Promise.all(months.map(m =>
@@ -202,8 +221,37 @@ async function fetchSchedule() {
 
 async function fetchStandings() {
   return cached('standings', 5 * 60 * 1000, async () => {
-    return getJson(`${SITE_WEB}/standings?season=${SEASON}`);
+    return getJson(`${SITE_WEB}/standings?season=${getSeason()}`);
   });
+}
+
+// Trim ESPN's large raw standings object down to the fields a standings view needs.
+// Every other endpoint returns a normalized shape; this keeps /api/standings consistent
+// and bounds the payload instead of proxying the full upstream blob.
+function normalizeStandings(raw) {
+  return (raw.children || []).map(child => ({
+    name: child.name || child.abbreviation || '',
+    entries: (child.standings?.entries || []).map(e => {
+      const byName = new Map((e.stats || []).map(s => [s.name, s]));
+      const pick = (n) => byName.get(n)?.displayValue ?? null;
+      return {
+        team: {
+          id: e.team?.id,
+          name: e.team?.displayName,
+          abbreviation: e.team?.abbreviation,
+          logo: e.team?.logos?.[0]?.href,
+        },
+        record: pick('overall'),
+        wins: pick('wins'),
+        losses: pick('losses'),
+        win_pct: pick('winPercent'),
+        games_behind: pick('gamesBehind'),
+        streak: pick('streak'),
+        home: pick('home'),
+        away: pick('road') ?? pick('away'),
+      };
+    }),
+  }));
 }
 
 // teamId -> "W-L" (e.g. "30-14"). Pulled from the standings "overall" stat.
@@ -267,6 +315,7 @@ async function fetchLeadersForSeason(season, rosterIndex) {
 
 async function fetchLeaders() {
   return cached('leaders', 60 * 60 * 1000, async () => {
+    const SEASON = getSeason();
     const teams = await fetchTeamsWithRosters();
     // Build an id→player map so we can resolve athlete refs without follow-up fetches.
     const rosterIndex = new Map();
@@ -331,9 +380,9 @@ app.get('/api/live', async (_req, res) => {
 
 app.get('/api/standings', async (_req, res) => {
   try {
-    const data = await fetchStandings();
+    const raw = await fetchStandings();
     edgeCache(res, 300, 900);
-    res.json(data);
+    res.json({ groups: normalizeStandings(raw) });
   } catch (e) {
     sendError(res, e);
   }
@@ -381,6 +430,7 @@ async function fetchTeamStatsForSeason(teamId, season) {
 
 async function fetchTeamStats(teamId) {
   return cached(`team_stats_${teamId}`, 30 * 60 * 1000, async () => {
+    const SEASON = getSeason();
     let stats = await fetchTeamStatsForSeason(teamId, SEASON).catch(() => []);
     // Early-season the current-year endpoint can be empty; fall back to last year.
     if (!stats.length && SEASON > 2020) {
@@ -577,3 +627,5 @@ if (require.main === module) {
 }
 
 module.exports = app;
+// Pure helpers exported for unit tests (no network).
+module.exports.__test = { getSeason, parseSpotracDate, parseTradesHtml, normalizeEvent, normalizeStandings, isValidId };

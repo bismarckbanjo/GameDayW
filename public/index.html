@@ -6,6 +6,18 @@
   <title>Game Day W - WNBA Lookup</title>
   <meta name="description" content="Game Day W — sleek WNBA lookup hub with rosters, schedule, stats, and more." />
   <meta name="theme-color" content="#000000" />
+
+  <!-- Open Graph / Twitter — shared deep links (a player, tonight's matchup) get a proper card. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Game Day W" />
+  <meta property="og:title" content="Game Day W — WNBA Lookup Hub" />
+  <meta property="og:description" content="Rosters, schedule, live scores, stats, injuries, and trades — faster than the big apps." />
+  <meta property="og:image" content="/icon.png" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Game Day W — WNBA Lookup Hub" />
+  <meta name="twitter:description" content="Rosters, schedule, live scores, stats, injuries, and trades — faster than the big apps." />
+  <meta name="twitter:image" content="/icon.png" />
+
   <link rel="icon" type="image/svg+xml" href="/light.svg" />
   <link rel="apple-touch-icon" href="/icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
@@ -56,24 +68,24 @@
       </button>
     </div>
 
-    <nav class="tabs" aria-label="Primary sections">
-      <button class="tab-btn active" data-tab="rosters">
+    <nav class="tabs" aria-label="Primary sections" role="tablist">
+      <button class="tab-btn active" data-tab="rosters" id="tab-rosters" role="tab" aria-selected="true" aria-controls="rosters" tabindex="0">
         <span class="tab-icon">🏀</span>
         Teams
       </button>
-      <button class="tab-btn" data-tab="schedule">
+      <button class="tab-btn" data-tab="schedule" id="tab-schedule" role="tab" aria-selected="false" aria-controls="schedule" tabindex="-1">
         <span class="tab-icon">📅</span>
         Schedule
       </button>
-      <button class="tab-btn" data-tab="stats">
+      <button class="tab-btn" data-tab="stats" id="tab-stats" role="tab" aria-selected="false" aria-controls="stats" tabindex="-1">
         <span class="tab-icon">📊</span>
         Stats
       </button>
-      <button class="tab-btn" data-tab="injuries">
+      <button class="tab-btn" data-tab="injuries" id="tab-injuries" role="tab" aria-selected="false" aria-controls="injuries" tabindex="-1">
         <span class="tab-icon">⛑</span>
         Injuries
       </button>
-      <button class="tab-btn" data-tab="trades">
+      <button class="tab-btn" data-tab="trades" id="tab-trades" role="tab" aria-selected="false" aria-controls="trades" tabindex="-1">
         <span class="tab-icon">🔄</span>
         Trades
       </button>
@@ -85,7 +97,7 @@
         <button class="close-btn" onclick="closeBanner()" aria-label="Close banner">×</button>
       </div>
 
-      <section id="rosters" class="tab-content active">
+      <section id="rosters" class="tab-content active" role="tabpanel" aria-labelledby="tab-rosters">
         <div class="section-head">
           <h2>Teams</h2>
           <div class="filters">
@@ -100,7 +112,7 @@
         </div>
       </section>
 
-      <section id="schedule" class="tab-content">
+      <section id="schedule" class="tab-content" role="tabpanel" aria-labelledby="tab-schedule">
         <div class="section-head">
           <h2>Schedule</h2>
           <div class="filters">
@@ -115,7 +127,7 @@
         </div>
       </section>
 
-      <section id="stats" class="tab-content">
+      <section id="stats" class="tab-content" role="tabpanel" aria-labelledby="tab-stats">
         <div class="section-head">
           <h2>Stats</h2>
         </div>
@@ -125,7 +137,7 @@
         </div>
       </section>
 
-      <section id="injuries" class="tab-content">
+      <section id="injuries" class="tab-content" role="tabpanel" aria-labelledby="tab-injuries">
         <div class="section-head">
           <h2>Injuries</h2>
           <div class="filters">
@@ -140,7 +152,7 @@
         </div>
       </section>
 
-      <section id="trades" class="tab-content">
+      <section id="trades" class="tab-content" role="tabpanel" aria-labelledby="tab-trades">
         <div class="section-head">
           <h2>Trades</h2>
         </div>

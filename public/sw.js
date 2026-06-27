@@ -7,9 +7,11 @@
 //    if the network actually fails.
 // Bump VERSION when shipping breaking changes to invalidate old caches.
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL_CACHE = `shell-${VERSION}`;
 const API_CACHE = `api-${VERSION}`;
+// Cap the API cache so a long session visiting many player pages can't grow it unbounded.
+const API_CACHE_MAX = 80;
 
 const SHELL_ASSETS = [
   '/',
@@ -19,6 +21,8 @@ const SHELL_ASSETS = [
   '/light.svg',
   '/dark.svg',
   '/icon.png',
+  '/icon-192.png',
+  '/icon-maskable.png',
   '/manifest.webmanifest',
 ];
 
@@ -40,11 +44,20 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+// Keep a cache from growing without bound by trimming oldest entries (FIFO by insertion order,
+// which is the order caches.keys() returns) once it exceeds `max`.
+async function trimCache(cacheName, max) {
+  const cache = await caches.open(cacheName);
+  const keys = await cache.keys();
+  if (keys.length <= max) return;
+  for (const req of keys.slice(0, keys.length - max)) await cache.delete(req);
+}
+
 async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   try {
     const fresh = await fetch(request);
-    if (fresh.ok) cache.put(request, fresh.clone());
+    if (fresh.ok) { await cache.put(request, fresh.clone()); trimCache(cacheName, API_CACHE_MAX); }
     return fresh;
   } catch {
     const cached = await cache.match(request);
@@ -58,7 +71,7 @@ async function staleWhileRevalidate(request, cacheName) {
   const cached = await cache.match(request);
   const network = fetch(request)
     .then((res) => {
-      if (res.ok) cache.put(request, res.clone());
+      if (res.ok) { cache.put(request, res.clone()).then(() => trimCache(cacheName, API_CACHE_MAX)); }
       return res;
     })
     .catch(() => null);
@@ -94,8 +107,10 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.pathname.startsWith('/api/')) {
-    // Live scoreboard must never appear stale. Everything else is fair game for SWR.
-    if (url.pathname === '/api/live') {
+    // Time-sensitive feeds (live scores, schedule status/scores) must never render stale —
+    // go network-first, falling back to cache only when offline. Everything else (rosters,
+    // leaders, trades, injuries) is fine to serve stale-while-revalidate for instant paint.
+    if (url.pathname === '/api/live' || url.pathname === '/api/schedule') {
       event.respondWith(networkFirst(request, API_CACHE));
     } else {
       event.respondWith(staleWhileRevalidate(request, API_CACHE));

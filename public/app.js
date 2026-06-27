@@ -89,6 +89,9 @@ function applyTheme(key) {
   root.setProperty('--on-primary', t.onPrimary);
   const logo = document.querySelector('.brand-mark img');
   if (logo) logo.src = DARK_LOGO_THEMES.has(key) ? '/dark.svg' : '/light.svg';
+  // Keep the installed-PWA status/title bar in sync with the chosen skin.
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.setAttribute('content', t.primary);
   localStorage.setItem('gameDayWTheme', key);
 }
 
@@ -109,6 +112,23 @@ function initThemePicker() {
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', (e) => switchTab(e.currentTarget.dataset.tab));
+});
+
+// ARIA tabs keyboard support: Left/Right (and Home/End) move between tabs and activate them.
+document.querySelector('.tabs')?.addEventListener('keydown', (e) => {
+  const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+  if (!keys.includes(e.key)) return;
+  const tabs = [...document.querySelectorAll('.tab-btn')];
+  const current = tabs.indexOf(document.activeElement);
+  if (current < 0) return;
+  e.preventDefault();
+  let next = current;
+  if (e.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+  else if (e.key === 'ArrowRight') next = (current + 1) % tabs.length;
+  else if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = tabs.length - 1;
+  tabs[next].focus();
+  switchTab(tabs[next].dataset.tab);
 });
 
 // --- URL routing -------------------------------------------------------------
@@ -138,9 +158,13 @@ function pushUrlState(state, { replace = false } = {}) {
 }
 
 function switchTab(tabName, opts = {}) {
-  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    const isActive = btn.dataset.tab === tabName;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    btn.tabIndex = isActive ? 0 : -1; // roving tabindex for the ARIA tabs pattern
+  });
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(tabName).classList.add('active');
   // openPlayer drives its own fetch — it passes { noLoad: true } so we don't race the leaders fetch
   // against the player-detail render.
@@ -369,6 +393,26 @@ function dayKey(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
+// Bucket a scoreboard feed into the slate categories the Today strip and Live modal both need.
+// ESPN's scoreboard returns the *next* slate when today is empty, so we filter by actual local
+// date before calling anything "today". Shared by renderTodayStrip() and showLiveModal() so the
+// two views can't drift apart.
+function slateBuckets(games) {
+  const now = new Date();
+  const todayK = dayKey(now);
+  const tomorrowK = dayKey(new Date(now.getTime() + 86400000));
+  const isToday = (g) => dayKey(new Date(g.scheduled)) === todayK;
+  const asc = (a, b) => new Date(a.scheduled) - new Date(b.scheduled);
+  const desc = (a, b) => new Date(b.scheduled) - new Date(a.scheduled);
+  return {
+    now, todayK, tomorrowK,
+    live: games.filter(g => g.state === 'in' && isToday(g)),
+    upcomingToday: games.filter(g => g.state === 'pre' && isToday(g)).sort(asc),
+    finishedToday: games.filter(g => g.state === 'post' && isToday(g)).sort(desc),
+    future: games.filter(g => g.state === 'pre' && new Date(g.scheduled).getTime() > now.getTime()).sort(asc),
+  };
+}
+
 // Map ESPN broadcast names → user-facing label + watch URL
 const WATCH_MAP = {
   'ABC':                 { label: 'ABC / ESPN App',   url: 'https://www.espn.com/watch/' },
@@ -427,9 +471,9 @@ function gameCardHtml(g) {
   return `
     <div class="card game${tappable ? ' is-link' : ''}"${linkAttrs}>
       <h3>
-        ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" class="team-logo-sm">` : ''}
+        ${g.away_team?.logo ? `<img src="${esc(g.away_team.logo)}" alt="" class="team-logo-sm">` : ''}
         ${esc(g.away_team?.name)}${specialTagHtml(g.away_team)} @
-        ${g.home_team?.logo ? `<img src="${esc(g.home_team.logo)}" class="team-logo-sm">` : ''}
+        ${g.home_team?.logo ? `<img src="${esc(g.home_team.logo)}" alt="" class="team-logo-sm">` : ''}
         ${esc(g.home_team?.name)}${specialTagHtml(g.home_team)}
       </h3>
       ${recordLine}
@@ -763,17 +807,23 @@ function displayInjuries() {
   grid.innerHTML = html;
 }
 
+// Client-side freshness window for data that's cheap to refetch but shouldn't go stale for a
+// whole all-day PWA session (the server already caches these, so a refetch is near-free).
+const CLIENT_TTL_MS = 5 * 60 * 1000;
+
 // Recent trades — scraped from spotrac, filtered server-side to the last ~30 days.
 let tradesData = null;
+let tradesFetchedAt = 0;
 async function loadTrades() {
   const grid = document.getElementById('tradesGrid');
   grid.innerHTML = '<p>Loading recent trades…</p>';
   try {
-    if (!tradesData) {
+    if (!tradesData || Date.now() - tradesFetchedAt > CLIENT_TTL_MS) {
       // Pull teams in parallel so we can resolve team brand colors for the arrows.
       const [res] = await Promise.all([fetch(`${API_BASE}/trades`), ensureTeams()]);
       const data = await res.json();
       tradesData = data.trades || [];
+      tradesFetchedAt = Date.now();
     }
     displayTrades(tradesData);
   } catch (err) {
@@ -828,16 +878,18 @@ function displayTrades(trades) {
 
 // League leaders board — what the Stats tab opens to before any search.
 let leadersData = null;
+let leadersFetchedAt = 0;
 async function loadStatsLanding() {
   const grid = document.getElementById('statsGrid');
   grid.innerHTML = '<p>Loading league leaders…</p>';
   try {
-    if (!leadersData) {
+    if (!leadersData || Date.now() - leadersFetchedAt > CLIENT_TTL_MS) {
       // ensureTeams runs in parallel — we need it cached so the meta chips (Ht/From) can fill
       // in when a fan opens a leader directly.
       const [res] = await Promise.all([fetch(`${API_BASE}/leaders`), ensureTeams()]);
       const data = await res.json();
       leadersData = data.categories || [];
+      leadersFetchedAt = Date.now();
     }
     renderStatsLanding(leadersData);
   } catch (err) {
@@ -1118,19 +1170,7 @@ function renderTodayStrip(games) {
   const strip = document.getElementById('todayStrip');
   if (!strip) return;
 
-  // ESPN's scoreboard returns the next set of games — which on a day with no games means
-  // tomorrow's slate. Filter by actual local date before claiming anything is "today".
-  const now = new Date();
-  const todayK = dayKey(now);
-  const tomorrowK = dayKey(new Date(now.getTime() + 86400000));
-  const isToday = (g) => dayKey(new Date(g.scheduled)) === todayK;
-
-  const liveToday = games.filter(g => g.state === 'in' && isToday(g));
-  const upcomingToday = games.filter(g => g.state === 'pre' && isToday(g))
-    .sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
-  const finishedToday = games.filter(g => g.state === 'post' && isToday(g))
-    .sort((a, b) => new Date(b.scheduled) - new Date(a.scheduled));
-
+  const { now, tomorrowK, live: liveToday, upcomingToday, finishedToday, future } = slateBuckets(games);
   const teamLabel = (t) => esc(t?.abbreviation || t?.name || '');
 
   if (liveToday.length) {
@@ -1173,8 +1213,6 @@ function renderTodayStrip(games) {
   }
 
   // No games today. Fall back to the next scheduled game, with an honest day label.
-  const future = games.filter(g => g.state === 'pre' && new Date(g.scheduled).getTime() > now.getTime())
-    .sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
   if (future.length) {
     const next = future[0];
     const d = new Date(next.scheduled);
@@ -1207,33 +1245,39 @@ async function pollLive() {
   }
 }
 
+// Adaptive poll cadence — fast while games are live, slower when games are only scheduled
+// for today, and a long idle interval in the offseason/overnight so we don't hammer the
+// scoreboard (or the user's battery/data) when nothing is happening.
+const LIVE_POLL_INTERVALS = { live: 30000, today: 60000, idle: 600000 };
+function nextLiveInterval(games) {
+  const { live, upcomingToday, finishedToday } = slateBuckets(games || []);
+  if (live.length) return LIVE_POLL_INTERVALS.live;
+  if (upcomingToday.length || finishedToday.length) return LIVE_POLL_INTERVALS.today;
+  return LIVE_POLL_INTERVALS.idle;
+}
+
 function startLivePolling() {
   if (document.hidden) return;
-  pollLive();
-  if (livePollTimer) clearInterval(livePollTimer);
-  livePollTimer = setInterval(pollLive, 30000);
+  stopLivePolling();
+  const tick = async () => {
+    await pollLive();
+    if (document.hidden) return; // tab hidden mid-poll — visibilitychange will restart us
+    livePollTimer = setTimeout(tick, nextLiveInterval(liveGamesCache));
+  };
+  tick();
 }
 
 function stopLivePolling() {
-  if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; }
+  if (livePollTimer) { clearTimeout(livePollTimer); livePollTimer = null; }
 }
+
+let lastFocusedBeforeModal = null;
 
 function showLiveModal() {
   const modal = document.getElementById('liveModal');
   const body = document.getElementById('liveModalBody');
 
-  // ESPN's scoreboard returns the next slate when today is empty — filter by actual local date
-  // before labelling anything as "Today".
-  const now = new Date();
-  const todayK = dayKey(now);
-  const tomorrowK = dayKey(new Date(now.getTime() + 86400000));
-  const isToday = (g) => dayKey(new Date(g.scheduled)) === todayK;
-
-  const live = liveGamesCache.filter(g => g.state === 'in' && isToday(g));
-  const upcomingToday = liveGamesCache.filter(g => g.state === 'pre' && isToday(g))
-    .sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
-  const finishedToday = liveGamesCache.filter(g => g.state === 'post' && isToday(g))
-    .sort((a, b) => new Date(b.scheduled) - new Date(a.scheduled));
+  const { tomorrowK, live, upcomingToday, finishedToday, future } = slateBuckets(liveGamesCache);
 
   let html = '';
   if (live.length) {
@@ -1253,9 +1297,6 @@ function showLiveModal() {
 
   // If today has nothing, surface the next scheduled day (often tomorrow) under its own header.
   if (!live.length && !upcomingToday.length && !finishedToday.length) {
-    const future = liveGamesCache
-      .filter(g => g.state === 'pre' && new Date(g.scheduled).getTime() > now.getTime())
-      .sort((a, b) => new Date(a.scheduled) - new Date(b.scheduled));
     if (future.length) {
       const firstK = dayKey(new Date(future[0].scheduled));
       const nextDay = future.filter(g => dayKey(new Date(g.scheduled)) === firstK);
@@ -1274,10 +1315,35 @@ function showLiveModal() {
   modal.classList.remove('hidden');
   // Always land at the top when (re)opening, so the close button is in reach.
   modal.querySelector('.modal-content')?.scrollTo({ top: 0 });
+  // Accessibility: remember where focus was, move it into the dialog, and lock background scroll.
+  lastFocusedBeforeModal = document.activeElement;
+  document.body.classList.add('modal-open');
+  document.getElementById('liveModalClose')?.focus();
 }
 
 function hideLiveModal() {
-  document.getElementById('liveModal').classList.add('hidden');
+  const modal = document.getElementById('liveModal');
+  if (modal.classList.contains('hidden')) return;
+  modal.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+  // Restore focus to whatever opened the modal so keyboard users aren't dumped at the top.
+  if (lastFocusedBeforeModal && typeof lastFocusedBeforeModal.focus === 'function') {
+    lastFocusedBeforeModal.focus();
+  }
+  lastFocusedBeforeModal = null;
+}
+
+// Keep Tab focus inside the Live modal while it's open.
+function trapModalFocus(e) {
+  if (e.key !== 'Tab') return;
+  const modal = document.getElementById('liveModal');
+  if (!modal || modal.classList.contains('hidden')) return;
+  const focusable = modal.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"])');
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 }
 
 // Global search — single input that searches teams, players, coaches and jumps to the
@@ -1348,6 +1414,13 @@ function renderGlobalSearchResults({ teams, players, coaches }) {
   results.innerHTML = sec('Teams', teamRows) + sec('Players', playerRows) + sec('Coaches', coachRows);
   results.classList.remove('hidden');
   input?.setAttribute('aria-expanded', 'true');
+  input?.removeAttribute('aria-activedescendant');
+
+  // Give each row an id + listbox option role so arrow-key navigation can track the active one.
+  results.querySelectorAll('.gs-row').forEach((row, i) => {
+    row.id = `gs-opt-${i}`;
+    row.setAttribute('role', 'option');
+  });
 
   results.querySelectorAll('.gs-row').forEach(row => {
     row.addEventListener('click', () => {
@@ -1421,7 +1494,26 @@ function initGlobalSearch() {
     }
   });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { input.blur(); clearGlobalSearch(); }
+    if (e.key === 'Escape') { input.blur(); clearGlobalSearch(); return; }
+
+    const rows = [...results.querySelectorAll('.gs-row')];
+    if (!rows.length || results.classList.contains('hidden')) return;
+    const activeIdx = rows.findIndex(r => r.classList.contains('gs-active'));
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = e.key === 'ArrowDown'
+        ? (activeIdx + 1) % rows.length
+        : (activeIdx - 1 + rows.length) % rows.length;
+      rows.forEach(r => { r.classList.remove('gs-active'); r.removeAttribute('aria-selected'); });
+      rows[next].classList.add('gs-active');
+      rows[next].setAttribute('aria-selected', 'true');
+      input.setAttribute('aria-activedescendant', rows[next].id || '');
+      rows[next].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter' && activeIdx >= 0) {
+      e.preventDefault();
+      rows[activeIdx].click();
+    }
   });
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#globalSearch')) hideGlobalSearch();
@@ -1515,6 +1607,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('liveModal')?.addEventListener('click', (e) => {
     if (e.target.id === 'liveModal') hideLiveModal();
   });
+  document.getElementById('liveModal')?.addEventListener('keydown', trapModalFocus);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') hideLiveModal();
   });

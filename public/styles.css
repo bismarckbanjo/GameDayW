@@ -316,7 +316,7 @@ header::after {
   cursor: pointer;
   font: inherit;
 }
-.gs-row:hover, .gs-row:focus-visible {
+.gs-row:hover, .gs-row:focus-visible, .gs-row.gs-active {
   background: color-mix(in srgb, var(--primary) 12%, transparent);
   outline: none;
 }
@@ -1461,6 +1461,9 @@ footer {
   vertical-align: middle;
   margin-left: 0.4rem;
 }
+
+/* Lock background scroll while the Live modal is open. */
+body.modal-open { overflow: hidden; }
 
 /* Modal */
 .modal-backdrop {

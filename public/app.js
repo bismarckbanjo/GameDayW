@@ -134,7 +134,7 @@ document.querySelector('.tabs')?.addEventListener('keydown', (e) => {
 // --- URL routing -------------------------------------------------------------
 // State is mirrored into the query string so deep links (?tab=schedule&team=Indiana%20Fever,
 // ?tab=stats&player=4433403) are shareable and the browser back button works the way fans expect.
-const KNOWN_TABS = new Set(['rosters', 'schedule', 'stats', 'injuries', 'trades']);
+const KNOWN_TABS = new Set(['rosters', 'schedule', 'stats', 'injuries', 'trades', 'challenge']);
 let suppressHistory = false; // true while restoring from popstate to avoid feedback loops
 
 function buildSearch(state) {
@@ -180,6 +180,7 @@ async function loadTabData(tabName) {
       case 'stats': await loadStatsLanding(); break;
       case 'injuries': await loadInjuries(); break;
       case 'trades': await loadTrades(); break;
+      case 'challenge': await loadChallenge(); break;
     }
   } catch (err) {
     console.error(`Error loading ${tabName}:`, err);
@@ -192,6 +193,280 @@ async function ensureTeams() {
   const data = await res.json();
   teamsData = data.teams || [];
   return teamsData;
+}
+
+/* =========================================================
+   WNBA Challenge — trivia built entirely from /api/teams data
+   (rosters: height / position / college, plus head coaches).
+   Dynamic generation means questions stay current with the
+   live data and every round is different.
+   ========================================================= */
+
+const CHALLENGE_ROUND_SIZE = 10;
+const CHALLENGE_BEST_KEY = 'gameDayWChallengeBest';
+
+// Which categories are in play. Mirrors the four question types fans asked for.
+const CHALLENGE_CATEGORIES = ['height', 'position', 'college', 'coach'];
+
+// Friendly, spelled-out labels for the terse ESPN position abbreviations so the
+// quiz reads naturally ("Guard" rather than "G").
+const POSITION_LABELS = {
+  G: 'Guard', F: 'Forward', C: 'Center',
+  'G/F': 'Guard / Forward', 'F/C': 'Forward / Center', 'F/G': 'Forward / Guard',
+};
+function positionLabel(abbr) {
+  return POSITION_LABELS[abbr] || abbr;
+}
+
+let challengeState = null;
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Two distinct wrong answers drawn from the same pool, never equal to the right one.
+function pickDistractors(pool, answer, n = 2) {
+  const choices = [...new Set(pool)].filter(v => v && v !== answer);
+  return shuffle(choices).slice(0, n);
+}
+
+function makeChallengeQuestion(category, prompt, answer, distractors, visual) {
+  return {
+    category,
+    prompt,
+    answer,
+    options: shuffle([answer, ...distractors]),
+    visual: visual || null,
+  };
+}
+
+// Turn the teams payload into every valid question we could ask, bucketed by
+// category. A question is only emitted when we can find two real distractors,
+// so the data itself guarantees the answer is always present and plausible.
+function buildChallengePool(teams, categories = CHALLENGE_CATEGORIES) {
+  const players = [];
+  for (const t of teams) {
+    for (const p of (t.players || [])) {
+      players.push({ ...p, teamName: t.name, teamLogo: t.logo });
+    }
+  }
+
+  const buckets = {};
+  for (const c of categories) buckets[c] = [];
+
+  if (categories.includes('height')) {
+    const valid = players.filter(p => p.name && p.height);
+    const allHeights = valid.map(p => p.height);
+    for (const p of valid) {
+      const d = pickDistractors(allHeights, p.height, 2);
+      if (d.length < 2) continue;
+      buckets.height.push(makeChallengeQuestion(
+        'height', `How tall is ${p.name}?`, p.height, d,
+        { headshot: p.headshot, name: p.name, sub: p.teamName }));
+    }
+  }
+
+  if (categories.includes('position')) {
+    const valid = players.filter(p => p.name && p.position);
+    const allPos = valid.map(p => positionLabel(p.position));
+    for (const p of valid) {
+      const ans = positionLabel(p.position);
+      const d = pickDistractors(allPos, ans, 2);
+      if (d.length < 2) continue;
+      buckets.position.push(makeChallengeQuestion(
+        'position', `What position does ${p.name} play?`, ans, d,
+        { headshot: p.headshot, name: p.name, sub: p.teamName }));
+    }
+  }
+
+  if (categories.includes('college')) {
+    const valid = players.filter(p => p.name && p.college);
+    const allColleges = valid.map(p => p.college);
+    for (const p of valid) {
+      const d = pickDistractors(allColleges, p.college, 2);
+      if (d.length < 2) continue;
+      buckets.college.push(makeChallengeQuestion(
+        'college', `What college did ${p.name} attend?`, p.college, d,
+        { headshot: p.headshot, name: p.name, sub: p.teamName }));
+    }
+  }
+
+  if (categories.includes('coach')) {
+    const valid = teams.filter(t => t.name && t.head_coach);
+    const allCoaches = valid.map(t => t.head_coach);
+    for (const t of valid) {
+      const d = pickDistractors(allCoaches, t.head_coach, 2);
+      if (d.length < 2) continue;
+      buckets.coach.push(makeChallengeQuestion(
+        'coach', `Who is the head coach of the ${t.name}?`, t.head_coach, d,
+        { logo: t.logo, name: t.name }));
+    }
+  }
+
+  return buckets;
+}
+
+// Round-robin across categories so a 10-question round feels varied rather than
+// ten height questions in a row.
+function drawChallengeRound(buckets, size = CHALLENGE_ROUND_SIZE) {
+  const queues = Object.values(buckets).map(list => shuffle(list)).filter(q => q.length);
+  const round = [];
+  let i = 0;
+  while (round.length < size && queues.some(q => q.length)) {
+    const q = queues[i % queues.length];
+    if (q.length) round.push(q.pop());
+    i++;
+  }
+  return round;
+}
+
+function getChallengeBest() {
+  const n = parseInt(localStorage.getItem(CHALLENGE_BEST_KEY) || '0', 10);
+  return Number.isFinite(n) ? n : 0;
+}
+function setChallengeBest(score) {
+  if (score > getChallengeBest()) localStorage.setItem(CHALLENGE_BEST_KEY, String(score));
+}
+
+async function loadChallenge() {
+  const root = document.getElementById('challengeGrid');
+  if (!root) return;
+  // Fresh start screen each time the tab is opened (unless mid-round already).
+  if (challengeState && !challengeState.finished) {
+    renderChallengeQuestion();
+    return;
+  }
+  root.innerHTML = `<p>Loading challenge…</p>`;
+  try {
+    const teams = await ensureTeams();
+    const buckets = buildChallengePool(teams);
+    challengeState = { buckets, round: [], index: 0, score: 0, streak: 0, bestStreak: 0, finished: true };
+    renderChallengeStart();
+  } catch (err) {
+    console.error('Challenge load error:', err);
+    root.innerHTML = `<div class="empty-state"><p>Couldn't load the challenge right now. Try again shortly.</p></div>`;
+  }
+}
+
+function startChallengeRound() {
+  const s = challengeState;
+  s.round = drawChallengeRound(s.buckets, CHALLENGE_ROUND_SIZE);
+  s.index = 0; s.score = 0; s.streak = 0; s.bestStreak = 0; s.answered = false; s.finished = false;
+  renderChallengeQuestion();
+}
+
+function renderChallengeStart() {
+  const root = document.getElementById('challengeGrid');
+  const best = getChallengeBest();
+  root.innerHTML = `
+    <div class="quiz-card quiz-intro">
+      <div class="quiz-intro-emoji">🎯</div>
+      <h3>WNBA Challenge</h3>
+      <p class="quiz-intro-copy">Ten multiple-choice questions on heights, positions, colleges and coaches — pulled live from the current rosters. Every round is different.</p>
+      ${best ? `<p class="quiz-best">Your best: <strong>${best}/${CHALLENGE_ROUND_SIZE}</strong></p>` : ''}
+      <button class="btn-primary quiz-start-btn" type="button">Start Challenge</button>
+    </div>`;
+  root.querySelector('.quiz-start-btn').addEventListener('click', startChallengeRound);
+}
+
+function renderChallengeQuestion() {
+  const root = document.getElementById('challengeGrid');
+  const s = challengeState;
+  const q = s.round[s.index];
+  if (!q) { renderChallengeResults(); return; }
+
+  let visual = '';
+  if (q.visual?.headshot) {
+    visual = `<img src="${esc(q.visual.headshot)}" alt="" class="quiz-headshot" onerror="this.style.display='none'">`;
+  } else if (q.visual?.logo) {
+    visual = `<img src="${esc(q.visual.logo)}" alt="" class="quiz-logo" onerror="this.style.display='none'">`;
+  }
+
+  root.innerHTML = `
+    <div class="quiz-card">
+      <div class="quiz-hud">
+        <span class="quiz-progress">Question ${s.index + 1} / ${s.round.length}</span>
+        <span class="quiz-stats">
+          <span class="quiz-score">Score ${s.score}</span>
+          <span class="quiz-streak ${s.streak >= 3 ? 'hot' : ''}">🔥 ${s.streak}</span>
+        </span>
+      </div>
+      <div class="quiz-progress-bar"><span style="width:${(s.index / s.round.length) * 100}%"></span></div>
+      <div class="quiz-prompt">
+        ${visual}
+        <h3>${esc(q.prompt)}</h3>
+      </div>
+      <div class="quiz-options">
+        ${q.options.map((opt, i) => `<button class="quiz-option" type="button" data-opt="${i}">${esc(opt)}</button>`).join('')}
+      </div>
+      <div class="quiz-footer"></div>
+    </div>`;
+
+  root.querySelectorAll('.quiz-option').forEach(btn => {
+    btn.addEventListener('click', () => answerChallenge(q.options[+btn.dataset.opt], btn));
+  });
+}
+
+function answerChallenge(choice, btn) {
+  const s = challengeState;
+  if (s.answered) return;
+  s.answered = true;
+  const q = s.round[s.index];
+  const correct = choice === q.answer;
+
+  if (correct) {
+    s.score++;
+    s.streak++;
+    if (s.streak > s.bestStreak) s.bestStreak = s.streak;
+  } else {
+    s.streak = 0;
+  }
+
+  const root = document.getElementById('challengeGrid');
+  root.querySelectorAll('.quiz-option').forEach(b => {
+    b.disabled = true;
+    const val = b.textContent;
+    if (val === q.answer) b.classList.add('is-correct');
+    else if (b === btn) b.classList.add('is-wrong');
+  });
+
+  const last = s.index === s.round.length - 1;
+  const footer = root.querySelector('.quiz-footer');
+  footer.innerHTML = `
+    <span class="quiz-verdict ${correct ? 'good' : 'bad'}">${correct ? 'Correct!' : `Answer: ${esc(q.answer)}`}</span>
+    <button class="btn-primary quiz-next-btn" type="button">${last ? 'See Results' : 'Next'}</button>`;
+  footer.querySelector('.quiz-next-btn').addEventListener('click', () => {
+    s.index++;
+    s.answered = false;
+    if (s.index >= s.round.length) renderChallengeResults();
+    else renderChallengeQuestion();
+  });
+}
+
+function renderChallengeResults() {
+  const root = document.getElementById('challengeGrid');
+  const s = challengeState;
+  s.finished = true;
+  setChallengeBest(s.score);
+  const pct = s.score / s.round.length;
+  let verdict = 'Keep practicing!';
+  if (pct === 1) verdict = 'Perfect round! 🏆';
+  else if (pct >= 0.8) verdict = 'Sharp shooting! 🎯';
+  else if (pct >= 0.5) verdict = 'Solid effort! 🏀';
+
+  root.innerHTML = `
+    <div class="quiz-card quiz-results">
+      <h3>${verdict}</h3>
+      <div class="quiz-final-score">${s.score}<span>/ ${s.round.length}</span></div>
+      <p class="quiz-result-meta">Best streak this round: <strong>${s.bestStreak}</strong> · All-time best: <strong>${getChallengeBest()}/${CHALLENGE_ROUND_SIZE}</strong></p>
+      <button class="btn-primary quiz-again-btn" type="button">Play Again</button>
+    </div>`;
+  root.querySelector('.quiz-again-btn').addEventListener('click', startChallengeRound);
 }
 
 function initials(name) {

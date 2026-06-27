@@ -89,6 +89,10 @@
         <span class="tab-icon">🔄</span>
         Trades
       </button>
+      <button class="tab-btn" data-tab="challenge" id="tab-challenge" role="tab" aria-selected="false" aria-controls="challenge" tabindex="-1">
+        <span class="tab-icon">🎯</span>
+        Challenge
+      </button>
     </nav>
 
     <main>
@@ -159,6 +163,16 @@
 
         <div id="tradesGrid" class="grid">
           <p>Loading recent trades…</p>
+        </div>
+      </section>
+
+      <section id="challenge" class="tab-content" role="tabpanel" aria-labelledby="tab-challenge">
+        <div class="section-head">
+          <h2>WNBA Challenge</h2>
+        </div>
+
+        <div id="challengeGrid">
+          <p>Loading challenge…</p>
         </div>
       </section>
     </main>
